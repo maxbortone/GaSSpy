@@ -10,16 +10,14 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
 
-# TODO: apply style guide principles
-# see: https://google.github.io/styleguide/pyguide.html
 
 class Spectrum:
     """
     Initialize a spectrum
 
     INPUT:
-        source:     object containing spectral information like
-                    flux and noise, but also redshift and coordinates (RA, DEC);
+        source:     object containing spectral information like flux and noise,
+                    but also redshift and coordinates (RA, DEC);
                     can also be the filename of a fits file
     """
     def __init__(self, source):
@@ -79,7 +77,7 @@ class Spectrum:
         if filename.endswith('.fits'):
             f = fits.open(filename)
         else:
-            raise ValueError('Filename {} is not a fits file.'.format(filename))
+            raise ValueError('{} is not a fits file.'.format(filename))
 
         try:
             header = f[0].header
@@ -126,13 +124,14 @@ class Spectrum:
     Signal to noise analysis
 
     INPUT:
-        wr: tuple or array of two floats representing a wavelength range, e.g. [4100, 4700]
+        wr: tuple or array of two floats representing a wavelength range,
+            e.g. [4100, 4700]
     """
     # TODO: on which flux should the analysis be performed?
     def signaltonoise(self, wr=[4100, 4700]):
         idx = (self.flux >= wr[0]) & (self.flux <= wr[1])
         S = self.flux[idx].mean()
-        N = self.noise[idx],mean()
+        N = self.noise[idx].mean()
         self.StoN = S / N
 
     """
@@ -156,7 +155,8 @@ class Spectrum:
     Normalize flux and noise by the mean flux over a wavelength interval [a, b]
 
     INPUT:
-        wr: tuple or array of two floats representing a wavelength range, e.g. [4100, 4700]
+        wr: tuple or array of two floats representing a wavelength range,
+            e.g. [4100, 4700]
         dc: wheter to use the dust corrected flux or not
     """
     def normalize(self, wr=[4100, 4700], dc=False):
@@ -237,6 +237,7 @@ class Spectrum:
         if self.mask is not None:
             self.mask = self.mask[idx]
 
+
 class Stack:
     """
     Initialize stack with a list of spectra
@@ -261,31 +262,51 @@ class Stack:
         if name:
             self.name = name
         # initialize attributes
-        self.masking = None         # wheter sky lines are being masked or not
-        self.M = None               # length of stacked spectrum
-        self.P = None               # stores the weighted sum of the spectra at each wavelength pixel
-        self.S = None               # stores the sum of the weights of the spectra at each wavelength pixel
-        self.wave = None            # wavelength pixels of stacked spectrum
-        # TODO: define a working flux that can be set to the stacked flux or the bias corrected one
-        self.flux = None            # flux of stacked spectrum
-        self.noise = None           # noise of stacked spectrum
-        self.contributions = None   # number of spectra that contributed to each wavelength pixel
-        self.dispersion = None      # dispersion of the sample at each wavelength pixel
-        self.StoN = None            # signal to noise ratio of the stacked spectrum
-        self.template = None        # MILES template that is being used for the ppxf fit
-        self.pp = None              # ppxf fit result
-        self.residual = None       # difference between stacked spectrum and ppxf bestfit
-        self.weights = None         # weights by which each template was multiplied to best fit the stacked spectrum
-        self.mean_log_age = None    # mean logarithmic age
-        self.mean_metal = None      # mean metallicity
+        # wheter sky lines are being masked or not
+        self.masking = None
+        # length of stacked spectrum
+        self.M = None
+        # stores the weighted sum of the spectra at each wavelength pixel
+        self.P = None
+        # stores the sum of the weights of the spectra at each wavelength pixel
+        self.S = None
+        # wavelength pixels of stacked spectrum
+        self.wave = None
+        # flux of stacked spectrum
+        # TODO: define a working flux that can be set to the stacked flux
+        #  or the bias corrected one
+        self.flux = None
+        # noise of stacked spectrum
+        self.noise = None
+        # number of spectra that contributed to each wavelength pixel
+        self.contributions = None
+        # dispersion of the sample at each wavelength pixel
+        self.dispersion = None
+        # signal to noise ratio of the stacked spectrum
+        self.StoN = None
+        # MILES template that is being used for the ppxf fit
+        self.template = None
+        # ppxf fit result
+        self.pp = None
+        # difference between stacked spectrum and ppxf bestfit
+        self.residual = None
+        # weights by which each template was multiplied to best fit
+        # the stacked spectrum
+        self.weights = None
+        # mean logarithmic age
+        self.mean_log_age = None
+        # mean metallicity
+        self.mean_metal = None
+        # mass to light ratio assuming Salpeter IMF
         # TODO: check if this makes sense with temp='kb'
-        self.mass_to_light = None   # mass to light ratio assuming Salpeter IMF
+        self.mass_to_light = None
 
     """
     Calculate the weighted average of the stack
 
     INPUT:
-        wr:     tuple or array of two floats representing a wavelength range, e.g. [4100, 4700]
+        wr:     tuple or array of two floats representing a wavelength range,
+                e.g. [4100, 4700]
         gs:     spacing of wavelength grid, e.g. 1 angstrom
         wl:     wavelengths of the sky spectrum to be masked
         dw:     width of region around wl to be masked
@@ -314,8 +335,10 @@ class Stack:
         for i in range(self.N-1):
             v1 = self.spectra[i+1].lam_interp[0]
             v2 = self.spectra[i+1].lam_interp[-1]
-            if v1 > w1: w1 = v1
-            if v2 < w2: w2 = v2
+            if v1 > w1:
+                w1 = v1
+            if v2 < w2:
+                w2 = v2
         # rebase all spectra to wavelength range [w1, w2]
         for i in range(self.N):
             sp = self.spectra[i]
@@ -384,7 +407,7 @@ class Stack:
             #   - continuum at 6800-7200
             # give out percentage difference
             if self.name:
-                print("Sample dispersion of stack_{} is high".format(self.name))
+                print("Sample dispersion of {} is high".format(self.name))
             else:
                 print("Sample dispersion is high")
         return disp
@@ -414,7 +437,8 @@ class Stack:
     Signal to noise analysis on stacked spectrum
 
     INPUT:
-        wr: tuple or array of two floats representing a wavelength range, e.g. [4100, 4700]
+        wr: tuple or array of two floats representing a wavelength range,
+            e.g. [4100, 4700]
     """
     def signaltonoise(self, wr):
         idx = (self.flux >= wr[0]) & (self.flux <= wr[1])
@@ -423,12 +447,13 @@ class Stack:
         self.StoN = S / N
 
     """
-    Fit the stacked spectrum using the Penalized Pixel Fitting method
-    ppxf by Michele Cappellari (http://www-astro.physics.ox.ac.uk/~mxc/software/) with
+    Fit the stacked spectrum using the Penalized Pixel Fitting method ppxf by
+    Michele Cappellari (http://www-astro.physics.ox.ac.uk/~mxc/software/) with
     the Miles stellar library (http://www.iac.es/proyecto/miles/)
 
     INPUT:
-        temp:   choose between 4 different templates with different IMF (default, kb, ku, un)
+        temp:   choose between 4 different templates with different IMF,
+                [default, kb, ku, un]
     """
     def ppxffit(self, temp='default', refit=False):
         # CONSTANTS:
@@ -446,17 +471,18 @@ class Stack:
         }
         miles_path = path + templates[temp]
         self.template = temp
-        # redshift is set to zero since stacked spectrum is calculated in rest frame
+        # redshift is set to zero since stacked spectrum is calculated
+        # in rest frame
         z = 0.0
 
         # run bias correction
-        # TODO: cannot run bias correction if residuals in balmer lines have been subtracted
-        # since self.P and self.S are not updated
+        # TODO: cannot run bias correction if residuals in balmer lines have
+        # been subtracted since self.P and self.S are not updated
         if not refit:
             self.correct()
 
-        # bring galaxy spectrum to same wavelength range as the one of the stellar library
-        # range is defined by the miles spectra
+        # bring galaxy spectrum to same wavelength range as the one of
+        # the stellar library
         mask = (self.wave > 3540) & (self.wave < 7409)
         wave = self.wave[mask]
         flux = self.flux[mask]
@@ -470,25 +496,33 @@ class Stack:
         lam = np.exp(miles.log_lam_temp)
         dv = c*np.log(lam[0]/wave[0])  # km/s
         lam_range_temp = [lam.min(), lam.max()]
-        goodpixels = util.determine_goodpixels(loglam, lam_range_temp, z, refit=refit)
+        goodpixels = util.determine_goodpixels(loglam, lam_range_temp, z,
+                                               refit=refit)
         # initialize start values
+        # TODO: check if initial estimate can be optimized to reduce
+        # comp time, z should be set to mean redshift of stacked spectrum
         vel = c*np.log(1 + z)   # galaxy velocity in km/s
-        # TODO: check initial estimate can be optimized to reduce computation time
         start = [vel, 180.]     # starting guess for [V, sigma] in km/s
-        # TODO: determine importance and effect of this parameter on the quality of the fit
+        # TODO: determine importance and effect of this parameter on
+        # the quality of the fit
         delta = 0.004       # regularization error
         # fit stacked spectrum with ppxf
         # NOTES:
-        #   - dv is necessary as the galaxy and the template do not have the same starting
-        #     wavelength and therefore a velocity shift is applied to the template. All
-        #     velocities are measured with respect to dv using the ppxf keyword vsyst
-        #   - since we are not interested in the kinematics additive polynomials are excluded
-        #     (degree=-1) and only multiplicative ones are used (mdegree=10), in order to preserve
-        #     the line strenght of spectral features
-        # TODO: check wheter clean=True should be set or not
+        #   - dv is necessary as the galaxy and the template do not have the
+        #     same starting wavelength and therefore a velocity shift is
+        #     applied to the template. All velocities are measured with respect
+        #     to dv using the ppxf keyword vsyst
+        #   - since we are not interested in the kinematics additive
+        #     polynomials are excluded (degree=-1) and only multiplicative ones
+        #     are used (mdegree=10), in order to preserve the line strenght of
+        #     spectral features
+        #   - the sigma clipping method is deactivated (clean=False), since we
+        #     don't expect to have residual emissions or cosmic rays in our
+        #     sample and we penalize these features during the stacking process
         pp = ppxf(miles.templates, flux, noise, velscale, start,
-                      goodpixels=goodpixels, plot=False, moments=4, degree=-1,
-                      vsyst=dv, clean=False, mdegree=10, regul=1./delta, quiet=True)
+                  goodpixels=goodpixels, plot=False, moments=4, degree=-1,
+                  vsyst=dv, clean=False, mdegree=10, regul=1./delta,
+                  quiet=True)
         weights = pp.weights.reshape(miles.n_ages, miles.n_metal)/pp.weights.sum()
         self.mean_log_age, self.mean_metal = miles.mean_age_metal(weights, quiet=True)
         self.mass_to_light = miles.mass_to_light(weights, band="r", quiet=True)
@@ -502,10 +536,11 @@ class Stack:
     and refit without masking the Balmer lines in goodpixel
     """
     def refit(self):
-        # fit balmer lines in self.residual with a gaussian to determine the width
-        def gaus(x,a,x0,sigma):
+        # fit balmer lines in self.residual with a gaussian
+        # to determine the width
+        def gaus(x, a, x0, sigma):
             return a*np.exp(-(x-x0)**2/(2.0*sigma**2))
-        balmer_lines = [4101.76, 4340.47, 4861.33,] # Hdelta, Hgamma, Hbeta
+        balmer_lines = [4101.76, 4340.47, 4861.33]  # Hdelta, Hgamma, Hbeta
         gaussians = []
         for line in balmer_lines:
             idx = (self.pp.lam >= np.round(line)-50) & (self.pp.lam <= np.round(line)+50)
@@ -528,7 +563,7 @@ class Stack:
         mpl.rcParams['mathtext.fontset'] = 'stixsans'
         mpl.rcParams['font.family'] = 'sans'
         mpl.rcParams['font.serif'] = 'STIXGeneral'
-        mpl.rcParams['text.usetex'] =True
+        mpl.rcParams['text.usetex'] = True
         mpl.rcParams['text.latex.preamble'] = [
                r'\usepackage{siunitx}',
                r'\sisetup{detect-all}',
@@ -569,7 +604,7 @@ class Stack:
         mpl.rcParams['mathtext.fontset'] = 'stixsans'
         mpl.rcParams['font.family'] = 'sans'
         mpl.rcParams['font.serif'] = 'STIXGeneral'
-        mpl.rcParams['text.usetex'] =True
+        mpl.rcParams['text.usetex'] = True
         mpl.rcParams['text.latex.preamble'] = [
                r'\usepackage{siunitx}',
                r'\sisetup{detect-all}',
@@ -639,9 +674,11 @@ class Stack:
             plt.savefig(filename)
         return axes
 
+
+# TODO: rewrite for parallelization
 """
-Derive the error on the age and metallicity estimation using the jackknife method
-described in Fagioli et al. (2016)
+Derive the error on the age and metallicity estimation using the jackknife
+method described in Fagioli et al. (2016)
 
 INPUT:
     stack:  Stack instance with N spectra
@@ -665,9 +702,9 @@ def error(stack, wr, gs, wl, dw, dc, tp):
     sigma_Z = np.sqrt(k*np.sum((met-Z)**2))
     return sigma_A, sigma_Z
 
-###########################################################################################################
+###############################################################################
 # TESTS
-###########################################################################################################
+###############################################################################
 
 def main1():
     from time import clock
@@ -796,6 +833,7 @@ def main5():
     axes.legend(loc="best", frameon=False, fontsize="12")
     # plt.show()
     plt.savefig('spectra-comp.png')
+
 
 if __name__ == "__main__":
     from os import listdir
