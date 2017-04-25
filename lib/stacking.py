@@ -25,6 +25,7 @@ class Spectrum:
             # source is empty: initialize a blank spectrum
             self.flux = None
             self.noise = None
+            self.loglam = None
             self.z = None
             self.z_err = None
             self.ra = None
@@ -42,6 +43,8 @@ class Spectrum:
                 self.noise = sp['NOISE']
             elif 'IVAR' in sp:
                 self.noise = sp['IVAR']
+            if 'LOGLAM' in sp:
+                self.loglam = sp['LOGLAM']
             if 'Z' in sp:
                 self.z = sp['Z']
             if 'Z_ERR' in sp:
@@ -63,7 +66,7 @@ class Spectrum:
         self.noise_interp = None
         self.lam_interp = None
         self.mask = None
-        self.StoN = None
+        self.SN = None
 
     """
     Read and initialize a spectrum from a fits file
@@ -129,10 +132,11 @@ class Spectrum:
     """
     # TODO: on which flux should the analysis be performed?
     def signaltonoise(self, wr=[4100, 4700]):
-        idx = (self.flux >= wr[0]) & (self.flux <= wr[1])
+        wave = 10**self.loglam
+        idx = (wave >= wr[0]) & (wave <= wr[1])
         S = self.flux[idx].mean()
         N = self.noise[idx].mean()
-        self.StoN = S / N
+        self.SN = S / N
 
     """
     De-redshift spectrum using the redshift information
@@ -163,9 +167,9 @@ class Spectrum:
         # TODO: add ability to choose between loglam and loglam_dered
         if self.loglam_dered is None:
             self.deredshift()
-        # setup mask around wavelength range
-        lam = 10**self.loglam_dered
-        idx = (lam >= wr[0]) & (lam <= wr[1])
+        # setup mask around wavelength range to calculate mean flux
+        wave = 10**self.loglam_dered
+        idx = (wave >= wr[0]) & (wave <= wr[1])
         if dc:
             flux_mean = self.flux_dustcorr[idx].mean()
         else:
@@ -227,6 +231,7 @@ class Spectrum:
         w2: right wavelength limit
     """
     def rebase(self, w1, w2):
+        # TODO: print out a warning if [w1, w2] is not all in self.lam_interp
         # get indices of wavelength in the range [w1, w2]
         idx = (self.lam_interp >= w1) & (self.lam_interp <= w2)
         # select flux, noise and wavelength in the range
@@ -283,7 +288,7 @@ class Stack:
         # dispersion of the sample at each wavelength pixel
         self.dispersion = None
         # signal to noise ratio of the stacked spectrum
-        self.StoN = None
+        self.SN = None
         # MILES template that is being used for the ppxf fit
         self.template = None
         # ppxf fit result
@@ -441,10 +446,10 @@ class Stack:
             e.g. [4100, 4700]
     """
     def signaltonoise(self, wr):
-        idx = (self.flux >= wr[0]) & (self.flux <= wr[1])
+        idx = (self.wave >= wr[0]) & (self.wave <= wr[1])
         S = self.flux[idx].mean()
         N = self.noise[idx].mean()
-        self.StoN = S / N
+        self.SN = S / N
 
     """
     Fit the stacked spectrum using the Penalized Pixel Fitting method ppxf by
@@ -843,3 +848,4 @@ if __name__ == "__main__":
     # main3()
     # main4()
     # main5()
+    main6()
