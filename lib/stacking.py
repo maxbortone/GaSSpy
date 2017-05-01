@@ -692,7 +692,7 @@ class Stack:
     ###########################################################################
     """
     Detect the presence of a peak at @line using sigma clipping. A peak is
-    detected if a positive 2sigma outlier is found within 3 angstrom from @line
+    detected if a positive 3sigma outlier is found within 3 angstrom from @line
 
     INPUT:
         wv:     array containing the wavelength coordinate of the spectrum
@@ -708,8 +708,9 @@ class Stack:
         idx = (wv >= line-20) & (wv <= line+20)
         wv = wv[idx]
         fl = fl[idx]
-        # perform sigma clipping with 2sigma for upper and lower clipping
-        sc = sigma_clip(fl, sigma=2, iters=None)
+        # perform sigma clipping with 3sigma for upper and lower clipping
+        # TODO: check how much should sigma be
+        sc = sigma_clip(fl, sigma=3, iters=None)
         pfl = sc.data[sc.mask]
         pwv = wv[sc.mask]
         # check if there is a peak within 3 pixels from balmer line
@@ -740,12 +741,12 @@ class Stack:
             detected = self._detect_peak(wv, rs, line)
             if detected:
                 idx = (wv >= line - 10) & (wv <= line + 10)
-                wv = wv[idx] - line
-                rs = rs[idx]
-                popt, pcov = curve_fit(gaussian, wv, rs, p0=[1.0, 0.0, 2.0])
-                gs = gaussian(wv, popt[0], popt[1], popt[2])
+                gwv = wv[idx] - line
+                grs = rs[idx]
+                popt, pcov = curve_fit(gaussian, gwv, grs, p0=[1.0, 0.0, 2.0])
+                gs = gaussian(gwv, popt[0], popt[1], popt[2])
                 fl_corr[idx] -= gs
-                gaussians.append(np.array([wv+line, gs]))
+                gaussians.append(np.array([gwv+line, gs]))
         return fl_corr, gaussians
 
 # TODO: rewrite for parallelization

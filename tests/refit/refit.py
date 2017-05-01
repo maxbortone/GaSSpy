@@ -27,7 +27,7 @@ print("- stack initialization: {}".format(clock()-t))
 wr = [4100, 4700]                   # wavelength range for normalization
 gs = 1.0                            # grid spacing for interpolation
 wl = np.array([5577, 6300, 6363])   # sky lines for masking
-dw = 10                             # broadness of sky lines for masking
+dw = 3                              # broadness of sky lines for masking
 dc = True                           # flag for dust correction
 tp = 'kb'                           # Kroupa IMF
 balmer_lines = [4101.76, 4340.47, 4861.33]
