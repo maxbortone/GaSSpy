@@ -3,12 +3,16 @@ import numpy as np
 from scipy.optimize import curve_fit
 from astroquery.sdss import SDSS
 from astropy.io import fits
+from astropy.stats import sigma_clip
 from ppxf import ppxf
 import ppxf_util as util
 import miles_util as lib
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
+
+def gaussian(x, amp, cen, wid):
+    return (amp/(np.sqrt(2*np.pi)*wid))*np.exp(-(x-cen)**2/(2*wid**2))
 
 
 class Spectrum:
@@ -459,6 +463,8 @@ class Stack:
     INPUT:
         temp:   choose between 4 different templates with different IMF,
                 [default, kb, ku, un]
+        refit:  refit the stacked spectrum after having removed the residuals
+                in the Balmer lines H_delta, H_gamma, H_beta
     """
     def ppxffit(self, temp='default', refit=False):
         # CONSTANTS:
@@ -480,27 +486,48 @@ class Stack:
         # in rest frame
         z = 0.0
 
-        # run bias correction
-        # TODO: cannot run bias correction if residuals in balmer lines have
-        # been subtracted since self.P and self.S are not updated
-        if not refit:
+        if refit:
+            # TODO: assert ppxf fit has already been done once
+            # galaxy spectrum is already in same wavelength range as stellar library
+            wave = np.array(self.pp.lam)
+            flux = np.array(self.pp.galaxy)
+            residual = np.array(self.residual)
+            #               H_delta, H_gamma, H_beta
+            balmer_lines = [4101.76, 4340.47, 4861.33]
+            flux, gaussians = self._subtract_residual(wave, flux, residual, balmer_lines)
+            # only compute velocity scale for ppxf since flux was already log-rebinned
+            # (copied from log_rebin function in ppxf_util.py)
+            n = len(flux)
+            lamRange = np.array([wave[0], wave[-1]])
+            dLam = np.diff(lamRange)/(n-1)
+            lim = lamRange/dLam + [-0.5, 0.5]
+            logLim = np.log(lim)
+            velscale = np.diff(logLim)/n*c
+            loglam = np.log(wave)
+            # select noise
+            mask = (self.wave > 3540) & (self.wave < 7409)
+            noise = self.noise[mask]
+        else:
+            # run bias correction
             self.correct()
+            # bring galaxy spectrum to same wavelength range as stellar library
+            mask = (self.wave > 3540) & (self.wave < 7409)
+            wave = self.wave[mask]
+            flux = self.flux[mask]
+            noise = self.noise[mask]
+            # rebin flux logarithmically for ppxf
+            flux, loglam, velscale = util.log_rebin([wave[0], wave[-1]], flux)
+            flux = flux / np.median(flux)
 
-        # bring galaxy spectrum to same wavelength range as the one of
-        # the stellar library
-        mask = (self.wave > 3540) & (self.wave < 7409)
-        wave = self.wave[mask]
-        flux = self.flux[mask]
-        noise = self.noise[mask]
-        # rebin flux logarithmically for ppxf
-        flux, loglam, velscale = util.log_rebin([wave[0], wave[-1]], flux)
-        flux = flux / np.median(flux)
         # initialize miles stellar library
         miles = lib.miles(miles_path, velscale, FWHM_gal)
         # determine goodpixels
         lam = np.exp(miles.log_lam_temp)
         dv = c*np.log(lam[0]/wave[0])  # km/s
         lam_range_temp = [lam.min(), lam.max()]
+        # compute good pixel by masking emission lines
+        # if refit do not mask balmer lines
+        # TODO: refactor util.determine_goodpixels in stacking.py
         goodpixels = util.determine_goodpixels(loglam, lam_range_temp, z,
                                                refit=refit)
         # initialize start values
@@ -535,27 +562,8 @@ class Stack:
         self.pp.lam = np.exp(loglam)
         self.weights = weights
         self.residual = self.pp.galaxy - self.pp.bestfit
-
-    """
-    Subtract residuals in the Balmer lines from stacked spectrum
-    and refit without masking the Balmer lines in goodpixel
-    """
-    def refit(self):
-        # fit balmer lines in self.residual with a gaussian
-        # to determine the width
-        def gaus(x, a, x0, sigma):
-            return a*np.exp(-(x-x0)**2/(2.0*sigma**2))
-        balmer_lines = [4101.76, 4340.47, 4861.33]  # Hdelta, Hgamma, Hbeta
-        gaussians = []
-        for line in balmer_lines:
-            idx = (self.pp.lam >= np.round(line)-50) & (self.pp.lam <= np.round(line)+50)
-            wv = self.pp.lam[idx]
-            rs = self.residual[idx]
-            popt, pcov = curve_fit(gaus, wv, rs, p0=[1.0, rs.mean(), rs.std()])
-            print rs
-            gs = gaus(wv, popt[0], popt[1], popt[2])
-            gaussians.append(np.array([wv, gs]))
-        return gaussians
+        if refit:
+            self.gaussians = gaussians
 
     """
     Plot stacked spectrum, noise, dispersion and bias correction
@@ -564,7 +572,7 @@ class Stack:
         filename:   plot filename
         title:      plot title
     """
-    def plotStack(self, filename, title=None):
+    def plotStack(self, filename=None, title=None):
         mpl.rcParams['mathtext.fontset'] = 'stixsans'
         mpl.rcParams['font.family'] = 'sans'
         mpl.rcParams['font.serif'] = 'STIXGeneral'
@@ -605,7 +613,7 @@ class Stack:
         filename:   plot filename
         title:      plot title
     """
-    def plotFit(self, filename, title=None):
+    def plotFit(self, filename=None, title=None):
         mpl.rcParams['mathtext.fontset'] = 'stixsans'
         mpl.rcParams['font.family'] = 'sans'
         mpl.rcParams['font.serif'] = 'STIXGeneral'
@@ -679,6 +687,66 @@ class Stack:
             plt.savefig(filename)
         return axes
 
+    ###########################################################################
+    # PRIVATE METHODS
+    ###########################################################################
+    """
+    Detect the presence of a peak at @line using sigma clipping. A peak is
+    detected if a positive 2sigma outlier is found within 3 angstrom from @line
+
+    INPUT:
+        wv:     array containing the wavelength coordinate of the spectrum
+        fl:     array containing the flux coordinate of the spectrum
+        line:   float representing the position of the peak
+
+    OUTPUT:
+        detected:   boolean, True if peak was detected
+    """
+    def _detect_peak(self, wv, fl, line):
+        detected = False
+        # select 20 pixel intervall around balmer line
+        idx = (wv >= line-20) & (wv <= line+20)
+        wv = wv[idx]
+        fl = fl[idx]
+        # perform sigma clipping with 2sigma for upper and lower clipping
+        sc = sigma_clip(fl, sigma=2, iters=None)
+        pfl = sc.data[sc.mask]
+        pwv = wv[sc.mask]
+        # check if there is a peak within 3 pixels from balmer line
+        # and if it is positive
+        pidx = (pwv >= line - 3) & (pwv <= line + 3)
+        if pidx.any() & (pfl[pidx] > 0).all():
+            detected = True
+        return detected
+
+    """
+    Subtract residual from stacked spectrum at Balmer lines by fitting detected
+    peaks with gaussians
+
+    INPUT:
+        wv:     array containing the wavelength coordinate of the spectrum
+        fl:     array containing the flux coordinate of the spectrum
+        rs:     array containing the residual to the bestfit of the spectrum
+        lines:  list of emission lines, e.g. Balmer lines
+
+    OUTPUT:
+        fl_corr:    array containing the residual subtracted flux
+        gaussians:  list of fitted gaussians
+    """
+    def _subtract_residual(self, wv, fl, rs, lines):
+        fl_corr = np.array(fl)
+        gaussians = []
+        for i, line in enumerate(lines):
+            detected = self._detect_peak(wv, rs, line)
+            if detected:
+                idx = (wv >= line - 10) & (wv <= line + 10)
+                wv = wv[idx] - line
+                rs = rs[idx]
+                popt, pcov = curve_fit(gaussian, wv, rs, p0=[1.0, 0.0, 2.0])
+                gs = gaussian(wv, popt[0], popt[1], popt[2])
+                fl_corr[idx] -= gs
+                gaussians.append(np.array([wv+line, gs]))
+        return fl_corr, gaussians
 
 # TODO: rewrite for parallelization
 """
