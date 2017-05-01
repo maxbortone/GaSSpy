@@ -430,13 +430,16 @@ class Stack:
         for i in range(self.M):
             p = self.P[i]
             s = self.S[i]
+            c = self.contributions[i]
             for j in range(self.N):
                 sp = self.spectra[j]
                 if not (self.masking and sp.mask[i]):
                     n = sp.noise_interp[i]
                     f = sp.flux_interp[i]
-                    corr[i] += (p - n*f) / (s - n)
-            c = self.contributions[i]
+                    # TODO: check why s = n
+                    # seems to be happen when c = 1
+                    if s != n:
+                        corr[i] += (p - n*f) / (s - n)
             corr[i] = (c-1)*(corr[i]/c - self.flux[i])
         self.correction = corr
         self.flux -= self.correction
