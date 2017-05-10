@@ -1,9 +1,8 @@
 import os
 import numpy as np
 from scipy.optimize import curve_fit
-from astroquery.sdss import SDSS
-from astropy.io import fits
 from astropy.stats import sigma_clip
+from spectrum import Spectrum
 from ppxf import ppxf
 import ppxf_util as util
 import miles_util as lib
@@ -11,240 +10,15 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MultipleLocator
 
+# setup matplotlib
+mpl.rcParams['text.usetex'] = True
+mpl.rcParams['text.latex.preamble'] = [
+       r'\usepackage{siunitx}',
+       r'\DeclareSIUnit\ergs{ergs}'
+]
+
 def gaussian(x, amp, cen, wid):
     return (amp/(np.sqrt(2*np.pi)*wid))*np.exp(-(x-cen)**2/(2*wid**2))
-
-
-class Spectrum:
-    """
-    Initialize a spectrum
-
-    INPUT:
-        source:     object containing spectral information like flux and noise,
-                    but also redshift and coordinates (RA, DEC);
-                    can also be the filename of a fits file
-    """
-    def __init__(self, source):
-        if source is None:
-            # source is empty: initialize a blank spectrum
-            self.flux = None
-            self.noise = None
-            self.loglam = None
-            self.z = None
-            self.z_err = None
-            self.ra = None
-            self.dec = None
-        elif source.endswith('.fits'):
-            # source is a fits file: copy attributes
-            sp = self.read(source)
-            for key in sp:
-                self.__dict__[key] = sp[key]
-        else:
-            # source is something else: look for minimum set of information
-            if 'FLUX' in sp:
-                self.flux = sp['FLUX']
-            if 'NOISE' in sp:
-                self.noise = sp['NOISE']
-            elif 'IVAR' in sp:
-                self.noise = sp['IVAR']
-            if 'LOGLAM' in sp:
-                self.loglam = sp['LOGLAM']
-            if 'Z' in sp:
-                self.z = sp['Z']
-            if 'Z_ERR' in sp:
-                self.z_err = sp['Z_ERR']
-            if 'PLUG_RA' in sp:
-                self.ra = sp['PLUG_RA']
-            elif 'RA' in sp:
-                self.ra = sp['PLUG_RA']
-            if 'PLUG_DEC' in sp:
-                self.dec = sp['PLUG_DEC']
-            elif 'DEC' in sp:
-                self.dec = sp['PLUG_DEC']
-
-        # initialize additional attributes
-        self.loglam_dered = None
-        self.flux_norm = None
-        self.noise_norm = None
-        self.flux_interp = None
-        self.noise_interp = None
-        self.lam_interp = None
-        self.mask = None
-        self.SN = None
-
-    """
-    Read and initialize a spectrum from a fits file
-    (https://data.sdss.org/datamodel/files/BOSS_SPECTRO_REDUX/RUN2D/spectra/PLATE4/spec.html)
-
-    INPUT:
-        filename:   string with path to a fits file,
-                    e.g. ./spectra/spec-DR13-1012-52649-639.fits
-    """
-    def read(self, filename):
-        if filename.endswith('.fits'):
-            f = fits.open(filename)
-        else:
-            raise ValueError('{} is not a fits file.'.format(filename))
-
-        try:
-            header = f[0].header
-            data = f[1].data
-            meta = f[2].data
-        except IndexError:
-            # TODO: handle exception
-            pass
-        else:
-            keys = header.keys()
-            data_cols = data.columns.names
-            meta_cols = meta.columns.names
-            sp = {}
-            # read right ascension and declination of object
-            if 'PLUG_RA' and 'PLUG_DEC' in keys:
-                sp['ra'] = header['PLUG_RA']
-                sp['dec'] = header['PLUG_DEC']
-            else:
-                # TODO: handle exception
-                pass
-            # read best redshift and error of object
-            if 'Z' and 'Z_ERR' in meta_cols:
-                sp['z'] = meta['Z']
-                sp['z_err'] = meta['Z_ERR']
-            else:
-                # TODO: handle exception
-                pass
-            # add spectral data
-            for key in data_cols:
-                sp[key.lower()] = data[key]
-            # rename ivar key into noise
-            sp['noise'] = sp.pop('ivar')
-            # TODO: keep both fluxes
-            # try:
-            #     sp['flux'] = sp.pop('flux_dustcorr')
-            # except:
-            #     pass
-            # add filename
-            sp['filename'] = filename
-            f.close()
-            return sp
-
-    """
-    Signal to noise analysis
-
-    INPUT:
-        wr: tuple or array of two floats representing a wavelength range,
-            e.g. [4100, 4700]
-    """
-    # TODO: on which flux should the analysis be performed?
-    def signaltonoise(self, wr=[4100, 4700]):
-        wave = 10**self.loglam
-        idx = (wave >= wr[0]) & (wave <= wr[1])
-        S = self.flux[idx].mean()
-        N = self.noise[idx].mean()
-        self.SN = S / N
-
-    """
-    De-redshift spectrum using the redshift information
-    the fits file
-
-    INPUT:
-        rs:     (optional) float representing a redshift estimation,
-                if set, rs will be used, otherwise self.z if it is defined
-    """
-    def deredshift(self, rs=None):
-        if rs is not None:
-            self.loglam_dered = self.loglam - np.log10(1+rs)
-        elif self.z is not None:
-            self.loglam_dered = self.loglam - np.log10(1+self.z)
-        else:
-            # TODO: handle exception
-            print('No redshift defined')
-
-    """
-    Normalize flux and noise by the mean flux over a wavelength interval [a, b]
-
-    INPUT:
-        wr: tuple or array of two floats representing a wavelength range,
-            e.g. [4100, 4700]
-        dc: wheter to use the dust corrected flux or not
-    """
-    def normalize(self, wr=[4100, 4700], dc=False):
-        # TODO: add ability to choose between loglam and loglam_dered
-        if self.loglam_dered is None:
-            self.deredshift()
-        # setup mask around wavelength range to calculate mean flux
-        wave = 10**self.loglam_dered
-        idx = (wave >= wr[0]) & (wave <= wr[1])
-        if dc:
-            flux_mean = self.flux_dustcorr[idx].mean()
-        else:
-            flux_mean = self.flux[idx].mean()
-        self.flux_norm = self.flux / flux_mean
-        self.noise_norm = self.noise / flux_mean
-
-    """
-    Mask wavelengths to remove contributions from sky emission lines,
-    for example around 5577, 6300 and 6363 angstrom in rest frame
-
-    INPUT:
-        wl: array of wavelengths to mask
-        dw: emission line width to be masked
-    """
-    def setmask(self, wl, dw):
-        # convert wavelengths into redshift frame
-        wl = wl / (1+self.z)
-        dw = dw / (1+self.z)
-        idx = []
-        # get masks for all intervalls
-        for w in wl:
-            a = w-dw
-            b = w+dw
-            idx.append(np.ma.masked_inside(self.lam_interp, a, b))
-        # merge all masks together
-        ms = np.ma.mask_or(idx[0].mask, idx[1].mask)
-        for i in range(len(idx)-2):
-            ms = np.ma.mask_or(ms, idx[i+2].mask)
-        self.mask = ms
-
-    """
-    Interpolate flux and noise on a grid of equally spaced wavelengths
-    between the smallest and largest integer wavelength in self.loglam_dered
-
-    INPUT:
-        gs: spacing of wavelength grid, e.g. 1 angstrom
-    """
-    def interpolate(self, gs):
-        # TODO: add ability to choose between flux and flux_norm
-        if self.flux_norm is None or self.noise_norm is None:
-            self.normalize()
-        # TODO: add ability to choose between loglam and loglam_dered
-        # setup grid
-        lam = 10**self.loglam_dered
-        a = np.ceil(lam[0])
-        b = np.ceil(lam[-1])
-        lam_interp = np.arange(a, b, gs)
-        # interpolate
-        self.flux_interp = np.interp(lam_interp, lam, self.flux_norm)
-        self.noise_interp = np.interp(lam_interp, lam, self.noise_norm)
-        self.lam_interp = lam_interp
-
-    """
-    Rebase interpolated spectrum to the wavelenght range [w1, w2]
-
-    INPUT:
-        w1: left wavelength limit
-        w2: right wavelength limit
-    """
-    def rebase(self, w1, w2):
-        # TODO: print out a warning if [w1, w2] is not all in self.lam_interp
-        # get indices of wavelength in the range [w1, w2]
-        idx = (self.lam_interp >= w1) & (self.lam_interp <= w2)
-        # select flux, noise and wavelength in the range
-        self.flux_interp = self.flux_interp[idx]
-        self.noise_interp = self.noise_interp[idx]
-        self.lam_interp = self.lam_interp[idx]
-        # select mask
-        if self.mask is not None:
-            self.mask = self.mask[idx]
 
 
 class Stack:
@@ -446,7 +220,7 @@ class Stack:
         return corr
 
     """
-    Signal to noise analysis on stacked spectrum
+    Computes the signal-to-noise ratio of the stacked spectrum
 
     INPUT:
         wr: tuple or array of two floats representing a wavelength range,
@@ -576,18 +350,6 @@ class Stack:
         title:      plot title
     """
     def plotStack(self, filename=None, title=None):
-        mpl.rcParams['mathtext.fontset'] = 'stixsans'
-        mpl.rcParams['font.family'] = 'sans'
-        mpl.rcParams['font.serif'] = 'STIXGeneral'
-        mpl.rcParams['text.usetex'] = True
-        mpl.rcParams['text.latex.preamble'] = [
-               r'\usepackage{siunitx}',
-               r'\sisetup{detect-all}',
-               r'\usepackage{sans}',
-               r'\usepackage{sansmath}',
-               r'\sansmath',
-               r'\DeclareSIUnit\erg{erg}'
-        ]
         wv = self.wave
         f, axes = plt.subplots(2, 1, sharex=True, figsize=(16, 9))
         axes[0].plot(wv, self.flux, 'b', label="stacked flux")
@@ -595,11 +357,11 @@ class Stack:
         axes[0].plot(wv, self.noise, 'g', label="noise")
         axes[0].plot(wv, self.dispersion, 'r', label="dispersion")
         axes[0].plot(wv, self.flux-self.correction, 'y', label="bias corrected")
-        axes[0].set_ylabel(r"$F_{\lambda}$ [\SI{e-17}{\erg\per\second\per\square\centi\meter\per\angstrom}]")
+        axes[0].set_ylabel(r"flux [\SI{e-17}{\ergs\per\second\per\square\centi\meter\per\angstrom}]")
         axes[0].legend(loc="best", frameon=False)
         axes[1].plot(wv, self.contributions)
         axes[1].set_ylabel("number of spectra")
-        axes[1].set_xlabel(r"$\lambda$ [\si{\angstrom}]")
+        axes[1].set_xlabel(r"wavelength [\si{\angstrom}]")
         axes[1].set_ylim([self.contributions.min()-5, self.N+5])
         axes[1].yaxis.set_major_locator(MultipleLocator(5))
         if title is not None:
@@ -617,27 +379,13 @@ class Stack:
         title:      plot title
     """
     def plotFit(self, filename=None, title=None):
-        mpl.rcParams['mathtext.fontset'] = 'stixsans'
-        mpl.rcParams['font.family'] = 'sans'
-        mpl.rcParams['font.serif'] = 'STIXGeneral'
-        mpl.rcParams['text.usetex'] = True
-        mpl.rcParams['text.latex.preamble'] = [
-               r'\usepackage{siunitx}',
-               r'\sisetup{detect-all}',
-               r'\usepackage{sans}',
-               r'\usepackage{sansmath}',
-               r'\sansmath',
-               r'\DeclareSIUnit\erg{erg}'
-        ]
         wv = self.pp.lam
-        # ns = self.pp.noise
-        f, axes = plt.subplots(1, 1, figsize=(16, 9))
+        f, axes = plt.subplots(1, 1, figsize=(11.69,8.27))
         axes.plot(wv, self.pp.galaxy, 'b', label="stacked spectrum")
-        # axes.fill_between(wv, fl-ns, fl+ns, facecolor="blue", alpha="0.5")
-        axes.plot(wv, self.pp.bestfit, 'g', label="ppxf fit", alpha="0.5")
+        axes.plot(wv, self.pp.bestfit, 'g', label="ppxf fit")
         axes.plot(wv, self.residual, 'r', label="residual")
-        axes.set_ylabel(r"$F_{\lambda}$ [\SI{e-17}{\erg\per\second\per\square\centi\meter\per\angstrom}]")
-        axes.set_xlabel(r"$\lambda$ [\si{\angstrom}]")
+        axes.set_ylabel(r"flux [\SI{e-17}{\ergs\per\second\per\square\centi\meter\per\angstrom}]")
+        axes.set_xlabel(r"wavelength [\si{\angstrom}]")
         axes.legend(loc="best", frameon=False)
         if title is not None:
             axes.set_title(title)
@@ -651,39 +399,42 @@ class Stack:
 
     INPUT:
         indices:    array of indices of spectra in the subset
-        fl:         flux(s) to be plotted: ['flux', 'flux_norm', 'flux_interp']
+        fl:         flux to be plotted: ['flux', 'flux_norm', 'flux_interp']
         wl:         wavelength to be plotted: ['loglam', 'loglam_dered']
-        linear:     flag to show linear or logarithmic plot
         show:       flag to show or not the plot
         filename:   name of the saved file
     OUTPUT:
         plot of spectra with shared x-axis
     """
-    def plotSpectra(self, indices, fl='flux', wl='loglam', linear=True, show=True, filename=None):
-        f, axes = plt.subplots(len(indices), 1, sharex=True)
+    def plotSpectra(self, indices, fl='flux', wl='loglam', wr=None, show=True, title=None, filename=None):
+        f, axes = plt.subplots(len(indices), 1, figsize=(11.69,8.27), sharex=True)
         for (k, index) in enumerate(indices):
             sp = self.spectra[index]
-            flux = []
             if isinstance(fl, basestring):
                 if fl is 'flux':
-                    flux[0] = sp.flux
+                    flux = sp.flux
                 elif fl is 'flux_norm':
-                    flux[0] = sp.flux_norm
+                    flux = sp.flux_norm
                 elif fl is 'flux_interp':
-                    flux[0] = sp.flux_interp
-            else:
-                for t in fl:
-                    flux.append(getattr(sp, t))
+                    flux = sp.flux_interp
             if wl is 'loglam':
                 lam = sp.loglam
             elif wl is 'loglam_dered':
                 lam = sp.loglam_dered
-            if linear:
-                lam = 10**lam
-            for i in range(len(flux)):
-                axes[k].plot(lam, flux[i])
+            lam = 10**lam
+            if wr:
+                idx = (lam >= wr[0]) & (lam <= wr[1])
+                axes[k].plot(lam[idx], flux[idx])
+            else:
+                axes[k].plot(lam, flux)
             axes[k].yaxis.set_major_locator(MultipleLocator(1.0))
-        plt.legend(loc="best")
+            axes[k].set_ylim(0.0, 2.0)
+            axes[k].text(0.05, 0.85, "Spectrum: {}".format(index+1), verticalalignment="top", transform=axes[k].transAxes)
+        f.text(0.5, 0.04, 'wavelength', ha='center', va='center')
+        f.text(0.06, 0.5, 'flux', ha='center', va='center', rotation='vertical')
+        f.suptitle(title)
+        # plt.subplots_adjust(bottom=0.01)
+        # plt.legend(loc="best")
         if show:
             plt.show()
         if filename is not None:
@@ -779,145 +530,35 @@ def error(stack, wr, gs, wl, dw, dc, tp):
     sigma_Z = np.sqrt(k*np.sum((met-Z)**2))
     return sigma_A, sigma_Z
 
-###############################################################################
-# TESTS
-###############################################################################
-
-def main1():
-    from time import clock
-    # load all fits filenames
-    spectra_path = './spectra_dustcorr'
-    spectra_files = [join(spectra_path, f) for f in listdir(spectra_path) if isfile(join(spectra_path, f))]
-    wr = [4100, 4700]
-    gs = 1.0
-    wl = np.array([5577, 6300, 6363])
-    dw = 10
-    dc = True
-    tp = 'kb'
-    t = clock()
-    stack = Stack(spectra_files)
-    print('Elapsed time in stack initialization: %.2f s' % (clock() - t))
-    t = clock()
-    lam, flux, noise, contrs = stack.average(wr, gs, wl=wl, dw=dw, dc=dc)
-    print('Elapsed time in stacking: %.2f s' % (clock() - t))
-    t = clock()
-    disp = stack.jackknife()
-    print('Elapsed time in jackknife: %.2f s' % (clock() - t))
-    t = clock()
-    corr = stack.correct()
-    print('Elapsed time in correct: %.2f s' % (clock() - t))
-    t = clock()
-    stack.ppxffit(temp=tp)
-    print('Elapsed time in ppxffit: %.2f s' % (clock() - t))
-    sigma_A, sigma_Z = error(stack, wr, gs, wl, dw, dc, tp)
-    print('Elapsed time in error: %.2f s' % (clock() - t))
-
-    print('Mean log age: %f +- %f Gyr' % (stack.mean_log_age, sigma_A))
-    print('Mean log age: %f +- %f ' % (stack.mean_metal, sigma_Z))
-
-    # indices = range(5)
-    # axes1 = stack.plotSpectra(indices, fl=['noise_norm', 'flux_norm'], wl='loglam_dered', show=False, filename='spectra-normed.png')
-
-    f, axes = plt.subplots(1, 1, figsize=(16.0, 9.0))
-    axes.plot(lam, flux, label="stacked flux")
-    axes.plot(lam, noise, label="noise")
-    axes.plot(lam, disp, label="dispersion")
-    axes.plot(lam, corr, label="correction")
-    axes.legend(loc="best", frameon=False)
-    plt.show()
-    # plt.savefig('spectra-stacked.png')
-
-def main2():
-    spectra_path = './spectra'
-    spectra_files = [join(spectra_path, f) for f in listdir(spectra_path) if isfile(join(spectra_path, f))]
-    stack = Stack(spectra_files)
-    k = len(spectra_files)
-
-    wl = np.array([5577, 6300, 6363])
-    dw = 10
-    lam, flux, noise, contr = stack.average([4100, 4700], 1.0)
-    lam_masked, flux_masked, noise_masked, contr_masked = stack.average([4100, 4700], 1.0, wl=wl, dw=dw)
-
-    f, axes = plt.subplots(2, 1, sharex=True, figsize=(16.0, 9.0))
-    ln = [wl-dw,wl+dw]
-    axes[0].plot(lam, flux, label="stacked flux")
-    axes[0].plot(lam_masked, flux_masked, label="with masking")
-    axes[0].plot(lam_masked, noise_masked, label="noise")
-    axes[0].vlines(wl, 0, flux.max(), label="sky emission lines")
-    # axes[0].vlines(ln, 0, flux.max(), linestyle="dotted")
-    axes[0].legend(loc="best", frameon=False, fontsize="12")
-    axes[1].vlines(wl, 0, k+2)
-    # axes[1].vlines(ln, 0, k+2, linestyle="dotted")
-    axes[1].plot(lam, contr_masked, label="contributions")
-    axes[1].legend(loc="best", frameon=False, fontsize="12")
-    # plt.show()
-    plt.savefig('spectra-masking.png')
-
-def main3():
-    spectra_path = './spectra_dustcorr'
-    spectra_files = [join(spectra_path, f) for f in listdir(spectra_path) if isfile(join(spectra_path, f))]
-    stack = Stack(spectra_files)
-    k = len(spectra_files)
-
-    wl = np.array([5577, 6300, 6363])
-    dw = 10
-    lam, flux, noise, contr = stack.average([4100, 4700], 1.0, dc=True)
-    lam_masked, flux_masked, noise_masked, contr_masked = stack.average([4100, 4700], 1.0, wl=wl, dw=dw, dc=True)
-
-    f, axes = plt.subplots(2, 1, sharex=True, figsize=(16.0, 9.0))
-    ln = [wl-dw,wl+dw]
-    axes[0].plot(lam, flux, label="stacked flux")
-    axes[0].plot(lam_masked, flux_masked, label="with masking")
-    axes[0].plot(lam_masked, noise_masked, label="noise")
-    axes[0].vlines(wl, 0, flux.max(), label="sky emission lines")
-    # axes[0].vlines(ln, 0, flux.max(), linestyle="dotted")
-    axes[0].legend(loc="best", frameon=False, fontsize="12")
-    axes[1].vlines(wl, 0, k+2)
-    # axes[1].vlines(ln, 0, k+2, linestyle="dotted")
-    axes[1].plot(lam, contr_masked, label="contributions")
-    axes[1].legend(loc="best", frameon=False, fontsize="12")
-    # plt.show()
-    plt.savefig('spectra-dustcorr-masking.png')
-
-def main4():
-    spectra_path = './spectra_dustcorr'
-    spectra_files = [join(spectra_path, f) for f in listdir(spectra_path) if isfile(join(spectra_path, f))]
-    stack = Stack(spectra_files)
-
-    wl = np.array([5577, 6300, 6363])
-    dw = 10
-    lam, flux, noise, contr = stack.average([4100, 4700], 1.0, wl=wl, dw=dw)
-    lam_dc, flux_dc, noise_dc, contr_dc = stack.average([4100, 4700], 1.0, wl=wl, dw=dw, dc=True)
-
-    f, axes = plt.subplots(1, 1, sharex=True, figsize=(16.0, 9.0))
-    axes.plot(lam, flux, label="stacked flux")
-    axes.plot(lam_dc, flux_dc, label="with dust correction")
-    axes.plot(lam, abs(flux_dc-flux), label="difference")
-    axes.legend(loc="best", frameon=False, fontsize="12")
-    # plt.show()
-    plt.savefig('spectra-dustcorr.png')
-
-def main5():
-    spectra_path = './spectra_dustcorr'
-    spectra_files = [join(spectra_path, f) for f in listdir(spectra_path) if isfile(join(spectra_path, f))]
-
-    sp = Spectrum(spectra_files[0])
-
-    f, axes = plt.subplots(1, 1, sharex=True, figsize=(16.0, 9.0))
-    axes.plot(10**sp.loglam, sp.flux, label="flux")
-    axes.plot(10**sp.loglam, sp.flux_dustcorr, label="with dust correction")
-    axes.plot(10**sp.loglam, abs(sp.flux_dustcorr-sp.flux), label="difference")
-    axes.legend(loc="best", frameon=False, fontsize="12")
-    # plt.show()
-    plt.savefig('spectra-comp.png')
-
 
 if __name__ == "__main__":
-    from os import listdir
-    from os.path import isfile, join
-    # main1()
-    # main2()
-    # main3()
-    # main4()
-    # main5()
-    main6()
+    from time import clock
+    path = os.path.dirname(__file__).split('lib')[0]
+    # import fits file and initialize stack
+    spectra_path = path + 'spectra_dustcorr/'
+
+    # initialize stack
+    spectra_files = [os.path.join(spectra_path, f) for f in os.listdir(spectra_path) if os.path.isfile(os.path.join(spectra_path, f))]
+    t = clock()
+    stack = Stack(spectra_files)
+    print("- stack initialization: {}".format(clock()-t))
+
+    # compute stacked spectrum with masking and dust correction
+    wr = [4100, 4700]                   # wavelength range for normalization
+    gs = 1.0                            # grid spacing for interpolation
+    wl = np.array([5577, 6300, 6363])   # sky lines for masking
+    dw = 3                              # broadness of sky lines for masking
+    dc = True                           # flag for dust correction
+    tp = 'kb'                           # Kroupa IMF
+
+    t = clock()
+    stack.average(wr, gs, wl=wl, dw=dw, dc=dc)
+    print("- stacking: {}".format(clock()-t))
+
+    # fit stacked spectrum with ppxf
+    t = clock()
+    stack.ppxffit(temp=tp)
+    print("- ppxf fit: {}".format(clock()-t))
+
+    # plot results
+    stack.plotFit()
