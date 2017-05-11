@@ -1,8 +1,5 @@
 import numpy as np
 from astropy.io import fits
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-from matplotlib.ticker import MultipleLocator
 
 class Spectrum:
     """
@@ -17,7 +14,8 @@ class Spectrum:
         if source is None:
             # source is empty: initialize a blank spectrum
             self.flux = None
-            self.noise = None
+            self.error = None
+            self.ivar = None
             self.loglam = None
             self.z = None
             self.z_err = None
@@ -28,14 +26,13 @@ class Spectrum:
             sp = self.read(source)
             for key in sp:
                 self.__dict__[key] = sp[key]
+            # determine flux error from inverse variance (ivar)
         else:
             # source is something else: look for minimum set of information
             if 'FLUX' in sp:
                 self.flux = sp['FLUX']
-            if 'NOISE' in sp:
-                self.noise = sp['NOISE']
-            elif 'IVAR' in sp:
-                self.noise = sp['IVAR']
+            if 'IVAR' in sp:
+                self.ivar = sp['IVAR']
             if 'LOGLAM' in sp:
                 self.loglam = sp['LOGLAM']
             if 'Z' in sp:
@@ -54,12 +51,14 @@ class Spectrum:
         # initialize additional attributes
         self.loglam_dered = None
         self.flux_norm = None
-        self.noise_norm = None
+        self.error_norm = None
         self.flux_interp = None
-        self.noise_interp = None
+        self.error_interp = None
         self.lam_interp = None
         self.mask = None
-        self.SN = None
+        self.SNR = 0
+        self.S = 0
+        self.N = 0
 
     """
     Read and initialize a spectrum from a fits file
@@ -101,16 +100,14 @@ class Spectrum:
             else:
                 # TODO: handle exception
                 pass
-            # read signal-to-noise of object:
-            if 'SN_MEDIAN_ALL' in meta_cols:
-                sp['sn_median'] = meta['SN_MEDIAN_ALL']
-            else:
-                pass
             # add spectral data
             for key in data_cols:
                 sp[key.lower()] = data[key]
-            # rename ivar key into noise
-            sp['noise'] = sp.pop('ivar')
+            # initialize error array if ivar is present
+            if 'ivar' in sp:
+                ivar = np.array(sp['ivar'])
+                np.place(ivar, ivar==0, np.nan)
+                sp['error'] = 1.0 / np.sqrt(ivar)
             # TODO: keep both fluxes
             # try:
             #     sp['flux'] = sp.pop('flux_dustcorr')
@@ -125,23 +122,33 @@ class Spectrum:
     Computes the signal-to-noise ratio of the spectrum
 
     INPUT:
-        wr: tuple or array of two floats representing a wavelength range,
-            e.g. [4100, 4700]
+        wlr: list or array of wavelength regions where to compute the SNR
+        flag: boolean, if True outputs SNR value in each wavelength region
     """
-    def signaltonoise(self, wr=[4500, 4700], flag=False):
-        # wave = 10**self.loglam_dered
-        wave = self.lam_interp
-        idx = (wave >= wr[0]) & (wave <= wr[1])
-        S = self.flux_interp[idx]
-        # N = self.noise_norm[idx].std()
-        # N = self.noise_interp[idx]
-        N = 1.0/np.sqrt(self.noise_interp[idx])
-        w = self.noise_interp[idx].mean()
+    def signaltonoise(self, wlr, flag=False):
+        # TODO: assert that spectrum has been deredshifted and normalized
+        m = wlr.shape[0]
+        SNRs = np.empty(m)
+        S = np.empty(m)
+        N = np.empty(m)
+        for i in range(m):
+            wave = 10**self.loglam_dered
+            idx = (wave >= wlr[i][0]) & (wave <= wlr[i][1])
+            s = np.median(self.flux_norm[idx])
+            # use np.nanmean instead of mean since self.err == nan where self.ivar == 0
+            if np.isnan(self.error_norm[idx]).all():
+                print "Warning: all NaN error in wavelength range {}-{}!".format(wlr[i][0], wlr[i][1])
+                n = np.nan
+            else:
+                n = np.nanmedian(self.error_norm[idx])
+            SNRs[i] = s / n
+            S[i] = s
+            N[i] = n
+        self.S = np.median(S)
+        self.N = np.nanmedian(N)
+        self.SNR = self.S / self.N
         if flag:
-            return np.median(S), np.median(N), w
-        else:
-            return np.median(S) / np.std(S)
-            # return np.median(S) / np.median(N)
+            return SNRs
 
     """
     De-redshift spectrum using the redshift information
@@ -180,7 +187,7 @@ class Spectrum:
         else:
             flux_median = np.median(self.flux[idx])
         self.flux_norm = self.flux / flux_median
-        self.noise_norm = self.noise / flux_median
+        self.error_norm = self.error / flux_median
 
     """
     Mask wavelengths to remove contributions from sky emission lines,
@@ -215,7 +222,7 @@ class Spectrum:
     """
     def interpolate(self, gs):
         # TODO: add ability to choose between flux and flux_norm
-        if self.flux_norm is None or self.noise_norm is None:
+        if self.flux_norm is None or self.error_norm is None:
             self.normalize()
         # TODO: add ability to choose between loglam and loglam_dered
         # setup grid
@@ -223,9 +230,12 @@ class Spectrum:
         a = np.ceil(lam[0])
         b = np.ceil(lam[-1])
         lam_interp = np.arange(a, b, gs)
-        # interpolate
+        # interpolate flux
         self.flux_interp = np.interp(lam_interp, lam, self.flux_norm)
-        self.noise_interp = np.interp(lam_interp, lam, self.noise_norm)
+        # TODO: check what happens if nan is at the boundary
+        # interpolate error replacing nan by linear interpolation
+        not_nan = np.logical_not(np.isnan(self.error_norm))
+        self.error_interp = np.interp(lam_interp, lam[not_nan], self.error_norm[not_nan])
         self.lam_interp = lam_interp
 
     """
@@ -242,7 +252,7 @@ class Spectrum:
         # select flux, noise and wavelength in the range
         # TODO: check if it is pointing to a new array
         self.flux_interp = self.flux_interp[idx]
-        self.noise_interp = self.noise_interp[idx]
+        self.error_interp = self.error_interp[idx]
         self.lam_interp = self.lam_interp[idx]
         # select mask
         if self.mask is not None:
