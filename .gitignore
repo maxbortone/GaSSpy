@@ -1,6 +1,8 @@
 *.png
 *.pyc
 *.txt
+*.pdf
+*.md
 /docs
 /report
 /tests/input.fits
