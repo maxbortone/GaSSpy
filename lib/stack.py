@@ -18,8 +18,19 @@ mpl.rcParams['text.latex.preamble'] = [
        r'\sisetup{per-mode=symbol}'
 ]
 
-def gaussian(x, amp, cen, wid):
-    return (amp/(np.sqrt(2*np.pi)*wid))*np.exp(-(x-cen)**2/(2*wid**2))
+# gaussian functions for emission line fitting
+# a: amplitude
+# w: width
+# c: centroid
+# y: offset
+def gaussian(x, a, c, w, y):
+    return (a/(np.sqrt(2*np.pi)*w))*np.exp(-(x-c)**2/(2*w**2)) + y
+
+def double_gaussian(x, a1, c1, w1, a2, c2, w2, y):
+    return gaussian(x, a1, c1, w1, 0.0) + gaussian(x, a2, c2, w2, 0.0) + y
+
+def triple_gaussian(x, a1, c1, w1, a2, c2, w2, a3, c3, w3, y):
+    return gaussian(x, a1, c1, w1, 0.0) + gaussian(x, a2, c2, w2, 0.0) + gaussian(x, a3, c3, w3, 0.0) + y
 
 
 class Stack:
@@ -86,6 +97,13 @@ class Stack:
         # mass to light ratio assuming Salpeter IMF
         # TODO: check if this makes sense with temp='kb'
         self.mass_to_light = None
+        # default emission lines to be masked in ppxf
+        # (source: http://classic.sdss.org/dr7/algorithms/reflines.dat)
+        # NOTE: wavelengths are given in angstrom for light travelling in vacuum
+        self.emlines = [('OII', 3728.3), ('H_delta', 4102.89), ('H_gamma', 4341.68), ('H_beta', 4862.68),
+                        ('OIII', 4960.295), ('OIII', 5008.24), ('OI', 6302.046),
+                        [('NII', 6549.86), ('H_alpha', 6564.61), ('NII', 6585.27)],
+                        [('SII', 6718.29), ('SII', 6732.67)]]
 
     """
     Prepare the spectra for stacking: deredshift, normalize, compute SNR and
@@ -256,10 +274,10 @@ class Stack:
     the Miles stellar library (http://www.iac.es/proyecto/miles/)
 
     INPUT:
-        temp:   choose between 4 different templates with different IMF,
-                [default, kb, ku, un]
-        refit:  refit the stacked spectrum after having removed the residuals
-                in the Balmer lines H_delta, H_gamma, H_beta
+        temp:       choose between 4 different templates with different IMF,
+                    [default, kb, ku, un]
+        refit:      refit the stacked spectrum after having removed the residuals
+                    in the emission lines
     """
     def ppxffit(self, temp='default', refit=False):
         # CONSTANTS:
@@ -287,9 +305,7 @@ class Stack:
             wave = np.array(self.pp.lam)
             flux = np.array(self.pp.galaxy)
             residual = np.array(self.residual)
-            #               H_delta, H_gamma, H_beta
-            balmer_lines = [4101.76, 4340.47, 4861.33]
-            flux, gaussians = self._subtract_residual(wave, flux, residual, balmer_lines)
+            flux, gaussians = self._subtract_residual(wave, flux, residual)
             # only compute velocity scale for ppxf since flux was already log-rebinned
             # (copied from log_rebin function in ppxf_util.py)
             n = len(flux)
@@ -321,10 +337,8 @@ class Stack:
         dv = c*np.log(lam[0]/wave[0])  # km/s
         lam_range_temp = [lam.min(), lam.max()]
         # compute good pixel by masking emission lines
-        # if refit do not mask balmer lines
-        # TODO: refactor util.determine_goodpixels in stacking.py
-        goodpixels = util.determine_goodpixels(loglam, lam_range_temp, z,
-                                               refit=refit)
+        # if refit do not mask emission lines
+        goodpixels = self._determine_goodpixels(loglam, lam_range_temp, z, refit=refit)
         # initialize start values
         # TODO: check if initial estimate can be optimized to reduce
         # comp time, z should be set to mean redshift of stacked spectrum
@@ -491,63 +505,233 @@ class Stack:
         self.flux -= self.correction
 
     """
-    Detect the presence of a peak at @line using sigma clipping. A peak is
-    detected if a positive 3sigma outlier is found within 3 angstrom from @line
+    # forked from ppxf_util.py by Michele Cappellari
+    Generates a list of goodpixels to mask a given set of gas emission
+    lines. This is meant to be used as input for PPXF.
 
     INPUT:
-        wv:     array containing the wavelength coordinate of the spectrum
-        fl:     array containing the flux coordinate of the spectrum
-        line:   float representing the position of the peak
+        logLam:         natural logarithm np.log(wave) of the wavelength in
+                        Angstrom of each pixel of the log rebinned galaxy spectrum
+        lamRangeTemp:   two elements vectors [lamMin2, lamMax2] with the minimum
+                        and maximum wavelength in Angstrom in the stellar template used in PPXF
+        z:              estimate of the galaxy redshift
+    OUTPUT:
+        goodpixels:     vector of goodPixels to be used as input for PPXF
+    """
+    def _determine_goodpixels(self, logLam, lamRangeTemp, z, refit=False):
+        # speed of light in km/s
+        c = 299792.458
+        flag = np.zeros_like(logLam, dtype=bool)
+        if not refit:
+            lines = []
+            for el in self.emlines:
+                if isinstance(el, tuple):
+                    lines.append(el[1])
+                elif isinstance(el, list):
+                    for l in el:
+                        lines.append(l[1])
+            # width/2 of masked gas emission region in km/s
+            dv = np.ones(len(lines))*800
+            for line, dvj in zip(lines, dv):
+                flag |= (np.exp(logLam) > line*(1 + z)*(1 - dvj/c)) \
+                      & (np.exp(logLam) < line*(1 + z)*(1 + dvj/c))
+
+        # mask edges of stellar library
+        flag |= np.exp(logLam) > lamRangeTemp[1]*(1 + z)*(1 - 900/c)
+        flag |= np.exp(logLam) < lamRangeTemp[0]*(1 + z)*(1 + 900/c)
+
+        return np.where(flag == 0)[0]
+
+    """
+    Detect the presence of a peak at line in @lines using sigma clipping. A peak is
+    detected if a positive 1sigma outlier is found within 3 angstrom from line
+
+    INPUT:
+        x:     array containing the x coordinate of the signal
+        y:     array containing the y coordinate of the signal
+        lines: float or list, contains the expected positions of the peak(s)
+               (in ascending order)
 
     OUTPUT:
-        detected:   boolean, True if peak was detected
+        detected:   boolean or array of booleans, True if peak was detected
     """
-    def _detect_peak(self, wv, fl, line):
-        detected = False
-        # select 20 pixel intervall around balmer line
-        idx = (wv >= line-20) & (wv <= line+20)
-        wv = wv[idx]
-        fl = fl[idx]
-        # perform sigma clipping with 3sigma for upper and lower clipping
-        # TODO: check how much should sigma be
-        sc = sigma_clip(fl, sigma=3, iters=None)
-        pfl = sc.data[sc.mask]
-        pwv = wv[sc.mask]
-        # check if there is a peak within 3 pixels from balmer line
-        # and if it is positive
-        pidx = (pwv >= line - 3) & (pwv <= line + 3)
-        if pidx.any() & (pfl[pidx] > 0).all():
-            detected = True
-        return detected
+    def _detect_peak(self, x, y, pk):
+        if isinstance(pk, float):
+            pk = [pk]
+        detected = np.zeros_like(pk, dtype=bool)
+        # select 20 pixel intervall around emission line
+        idx = (x >= pk[0]-20) & (x <= pk[-1]+20)
+        x = x[idx]
+        y = y[idx]
+        sc = sigma_clip(y, sigma=1, iters=None)
+        py = sc.data[sc.mask]
+        px = x[sc.mask]
+        for i in range(len(pk)):
+            # check if there is a peak within 3 pixels from emission line
+            # and if it is positive
+            pidx = (px >= pk[i] - 3) & (px <= pk[i] + 3)
+            if pidx.any() and (py[pidx] > 0).all():
+                detected[i] = True
+        if len(detected) == 1:
+            return detected[0]
+        else:
+            return detected
 
     """
-    Subtract residual from stacked spectrum at Balmer lines by fitting detected
+    Subtract residual from stacked spectrum at emission lines by fitting detected
     peaks with gaussians
 
     INPUT:
         wv:     array containing the wavelength coordinate of the spectrum
         fl:     array containing the flux coordinate of the spectrum
         rs:     array containing the residual to the bestfit of the spectrum
-        lines:  list of emission lines, e.g. Balmer lines
 
     OUTPUT:
         fl_corr:    array containing the residual subtracted flux
         gaussians:  list of fitted gaussians
     """
-    def _subtract_residual(self, wv, fl, rs, lines):
+    def _subtract_residual(self, wv, fl, rs):
         fl_corr = np.array(fl)
         gaussians = []
-        for i, line in enumerate(lines):
-            detected = self._detect_peak(wv, rs, line)
-            if detected:
-                idx = (wv >= line - 10) & (wv <= line + 10)
-                gwv = wv[idx] - line
-                grs = rs[idx]
-                popt, pcov = curve_fit(gaussian, gwv, grs, p0=[1.0, 0.0, 2.0])
-                gs = gaussian(gwv, popt[0], popt[1], popt[2])
-                fl_corr[idx] -= gs
-                gaussians.append(np.array([gwv+line, gs]))
+        for el in self.emlines:
+            if isinstance(el, tuple):
+                line = el[1]
+                gwv, gs, idx = self._fit_singlet(wv, rs, line)
+                if gs is not None:
+                    fl_corr[idx] -= gs
+                    gaussians.append(np.array([gwv, gs]))
+            elif isinstance(el, list) and len(el) == 2:
+                doublet = [el[0][1], el[1][1]]
+                gwv, gs, idx = self._fit_doublet(wv, rs, doublet)
+                if gs is not None:
+                    fl_corr[idx] -= gs
+                    gaussians.append(np.array([gwv, gs]))
+            elif isinstance(el, list) and len(el) == 3:
+                triplet = [el[0][1], el[1][1], el[2][1]]
+                gwv, gs, idx = self._fit_triplet(wv, rs, triplet)
+                if gs is not None:
+                    fl_corr[idx] -= gs
+                    gaussians.append(np.array([gwv, gs]))
         return fl_corr, gaussians
+
+    """
+    Fit a signal around @line with a simple gaussian curve
+
+    INPUT:
+        x:     array containing the x coordinate of the signal
+        y:     array containing the y coordinate of the signal
+        line:  float, wavelength around which fit should be performed
+
+    OUTPUT:
+        gx:    array containing the x coordinate of the gaussian
+        gy:    array containing the y coordinate of the gaussian
+        idx:   array containing the indices of the fit
+    """
+    def _fit_singlet(self, x, y, line):
+        gx = None
+        gs = None
+        idx = None
+        if line >= x[0] and line <= x[-1]:
+            det = self._detect_peak(x, y, line)
+            print("\tpeak at: {} = {}".format(line, det))
+            if det:
+                idx = (x >= line - 10) & (x <= line + 10)
+                gx = x[idx]
+                gy = y[idx]
+                params = [1.0, 0.0, 2.0, 0.0]
+                try:
+                    popt, pcov = curve_fit(gaussian, gx-line, gy, p0=params)
+                except RuntimeError as err:
+                    print("Curve fitting the line at {} raised runtime error: {}".format(line, err))
+                else:
+                    gs = gaussian(gx-line, *popt)
+        return gx, gs, idx
+
+    """
+    Fit a signal around between the lines in @doublet with a double gaussian curve
+
+    INPUT:
+        x:        array containing the x coordinate of the signal
+        y:        array containing the y coordinate of the signal
+        doublet:  list containing the wavelenghts of the lines around which
+                  the fit should be performed (in ascending order)
+
+    OUTPUT:
+        gx:    array containing the x coordinate of the gaussian
+        gy:    array containing the y coordinate of the gaussian
+        idx:   array containing the indices of the fit
+    """
+    def _fit_doublet(self, x, y, doublet):
+        gx = None
+        gs = None
+        idx = None
+        if doublet[0] >= x[0] and doublet[1] <= x[-1]:
+            det = self._detect_peak(x, y, doublet)
+            print("\tpeak at: {} = {}, {} = {}".format(doublet[0], det[0], doublet[1], det[1]))
+            if det[0] and det[1]:
+                idx = (x >= doublet[0] - 10) & (x <= doublet[1] + 10)
+                gx = x[idx]
+                gy = y[idx]
+                c0 = (doublet[1]-doublet[0])/2
+                params = [1.0, -c0, 2.0, 1.0, c0, 2.0, 0.0]
+                try:
+                    popt, pcov = curve_fit(double_gaussian, gx-np.mean(doublet), gy, p0=params)
+                except RuntimeError as err:
+                    print("Curve fitting the doublet at {}-{} raised runtime error: {}"
+                          .format(doublet[0], doublet[1], err))
+                else:
+                    gs = double_gaussian(gx-np.mean(doublet), *popt)
+            if det[0] and not det[1]:
+                gx, gs, idx = self._fit_singlet(x, y, doublet[0])
+            if det[1] and not det[0]:
+                gx, gs, idx = self._fit_singlet(x, y, doublet[1])
+        return gx, gs, idx
+
+    """
+    Fit a signal around @line with a simple gaussian curve
+
+    INPUT:
+        x:        array containing the x coordinate of the signal
+        y:        array containing the y coordinate of the signal
+        triplet:  list containing the wavelenghts of the lines around which
+                  the fit should be performed (in ascending order)
+
+    OUTPUT:
+        gx:    array containing the x coordinate of the gaussian
+        gy:    array containing the y coordinate of the gaussian
+        idx:   array containing the indices of the fit
+    """
+    def _fit_triplet(self, x, y, triplet):
+        gx = None
+        gs = None
+        idx = None
+        if triplet[0] >= x[0] and triplet[2] <= x[-1]:
+            det = self._detect_peak(x, y, triplet)
+            print("\tpeak at: {} = {}, {} = {}, {} = {}".format(triplet[0], det[0], triplet[1], det[1], triplet[2], det[2]))
+            if det.all():
+                idx = (x >= triplet[0] - 10) & (x <= triplet[2] + 10)
+                gx = x[idx]
+                gy = y[idx]
+                c0 = triplet[1]-triplet[0]
+                params = [1.0, -c0, 2.0, 1.0, 0.0, 2.0, 1.0, c0, 2.0, 0.0]
+                try:
+                    popt, pcov = curve_fit(triple_gaussian, gx-triplet[1], gy, p0=params)
+                except RuntimeError as err:
+                    print("Curve fitting the triplet at {}-{}-{} raised runtime error: {}"
+                          .format(triplet[0], triplet[1], triplet[2], err))
+                else:
+                    gs = triple_gaussian(gx-triplet[1], *popt)
+            if (det[0] and det[1]) and not det[2]:
+                gx, gs, idx = self._fit_doublet(x, y, [triplet[0], triplet[1]])
+            if (det[1] and det[2]) and not det[0]:
+                gx, gs, idx = self._fit_doublet(x, y, [triplet[1], triplet[2]])
+            if det[0] and (not det[1] and not det[2]):
+                gx, gs, idx = self._fit_singlet(x, y, triplet[0])
+            if det[1] and (not det[2] and not det[0]):
+                gx, gs, idx = self._fit_singlet(x, y, triplet[1])
+            if det[2] and (not det[0] and not det[1]):
+                gx, gs, idx = self._fit_singlet(x, y, triplet[2])
+        return gx, gs, idx
 
 # TODO: rewrite for parallelization
 """
