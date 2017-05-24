@@ -55,7 +55,7 @@ class Spectrum:
         self.flux_interp = None
         self.error_interp = None
         self.lam_interp = None
-        self.mask = None
+        self.mask = np.isnan(self.error)
         self.SNR = 0
         self.S = 0
         self.N = 0
@@ -190,14 +190,15 @@ class Spectrum:
         self.error_norm = self.error / flux_median
 
     """
-    Mask wavelengths to remove contributions from sky emission lines,
-    for example around 5577, 6300 and 6363 angstrom in rest frame
+    Mask wavelengths in @wl with width @dw to remove contributions from sky
+    emission lines, e.g. around 5577, 6300 and 6363 angstrom in rest frame
 
     INPUT:
         wl: array of wavelengths to mask
         dw: emission line width to be masked
     """
-    def setmask(self, wl, dw):
+    def set_skylines(self, wl, dw):
+        # TODO: assert len(self.mask) == len(self.lam_interp)
         # convert wavelengths into redshift frame
         wl = wl / (1+self.z)
         dw = dw / (1+self.z)
@@ -211,7 +212,7 @@ class Spectrum:
         ms = np.ma.mask_or(idx[0].mask, idx[1].mask)
         for i in range(len(idx)-2):
             ms = np.ma.mask_or(ms, idx[i+2].mask)
-        self.mask = ms
+        self.mask = np.ma.mask_or(self.mask, ms)
 
     """
     Interpolate flux and noise on a grid of equally spaced wavelengths
@@ -236,6 +237,7 @@ class Spectrum:
         # interpolate error replacing nan by linear interpolation
         not_nan = np.logical_not(np.isnan(self.error_norm))
         self.error_interp = np.interp(lam_interp, lam[not_nan], self.error_norm[not_nan])
+        self.mask = np.interp(lam_interp, lam, self.mask).astype(bool)
         self.lam_interp = lam_interp
 
     """
@@ -249,11 +251,8 @@ class Spectrum:
         # TODO: print out a warning if [w1, w2] is not all in self.lam_interp
         # get indices of wavelength in the range [w1, w2]
         idx = (self.lam_interp >= w1) & (self.lam_interp <= w2)
-        # select flux, noise and wavelength in the range
-        # TODO: check if it is pointing to a new array
+        # select flux, noise, wavelength and mask in the range
         self.flux_interp = self.flux_interp[idx]
         self.error_interp = self.error_interp[idx]
         self.lam_interp = self.lam_interp[idx]
-        # select mask
-        if self.mask is not None:
-            self.mask = self.mask[idx]
+        self.mask = self.mask[idx]

@@ -46,8 +46,6 @@ class Stack:
         # initialize attributes
         # name of the stack
         self.name = None
-        # wheter sky lines are being masked or not
-        self.masking = None
         # length of stacked spectrum
         self.M = None
         # weights by which each spectra is multiplied in the stacking process
@@ -110,8 +108,6 @@ class Stack:
         dc:     wheter to use the dust corrected flux or not
     """
     def prepare_spectra(self, wr, wlr, gs, wl=None, dw=None, dc=False):
-        # set masking flag
-        self.masking = (wl is not None) and (dw is not None)
         # prepare spectra
         for i in range(self.N):
             sp = self.spectra[i]
@@ -119,8 +115,8 @@ class Stack:
             sp.normalize(wr, dc)
             sp.signaltonoise(wlr)
             sp.interpolate(gs)
-            if self.masking:
-                sp.setmask(wl, dw)
+            if (wl is not None) and (dw is not None):
+                sp.set_skylines(wl, dw)
 
     def determine_wavelength_range(self):
         # find maximal common wavelength range limits
@@ -148,7 +144,8 @@ class Stack:
         for i in range(self.N):
             sp = self.spectra[i]
             for j in range(self.M):
-                self.weights[i, j] = sp.flux_norm[i] / sp.error_norm[i]
+                if not sp.mask[j]:
+                    self.weights[i, j] = sp.flux_interp[j] / sp.error_interp[j]
         for j in range(self.M):
             # normalize weights
             self.weights[:, j] = self.weights[:, j] / sum(self.weights[:, j])
@@ -180,7 +177,7 @@ class Stack:
             c = self.N
             for j in range(self.N):
                 sp = self.spectra[j]
-                if self.masking and sp.mask[i]:
+                if sp.mask[i]:
                     c -= 1
                 else:
                     p += sp.flux_interp[i] * self.weights[j, i]
@@ -214,7 +211,7 @@ class Stack:
             g = 0
             for j in range(self.N):
                 sp = self.spectra[j]
-                if not (self.masking and sp.mask[i]):
+                if not sp.mask[i]:
                     w = self.weights[j, i]
                     f = sp.flux_interp[i]
                     g += ((p*(s-w) - s*(p-w*f)) / (s*(s-w)))**2
@@ -509,7 +506,7 @@ class Stack:
             c = self.contributions[i]
             for j in range(self.N):
                 sp = self.spectra[j]
-                if not (self.masking and sp.mask[i]):
+                if not sp.mask[i]:
                     w = self.weights[j, i]
                     f = sp.flux_interp[i]
                     if s != w:
@@ -783,9 +780,7 @@ if __name__ == "__main__":
 
     # initialize stack
     spectra_files = [os.path.join(spectra_path, f) for f in os.listdir(spectra_path) if os.path.isfile(os.path.join(spectra_path, f))]
-    t = clock()
-    stack = Stack(spectra_files)
-    print("- stack initialization: {}s".format(clock()-t))
+    print("Stacking {} spectra".format(len(spectra_files)))
 
     # compute stacked spectrum with masking and dust correction
     wr = [4100, 4700]                   # wavelength range for normalization
@@ -799,32 +794,38 @@ if __name__ == "__main__":
     dc = True                           # flag for dust correction
     tp = 'kb'                           # Kroupa IMF
 
+    # initialize stack instance
+    t = clock()
+    stack = Stack(spectra_files)
+    print("- stack initialization: {}s".format(clock()-t))
     # prepare spectra for stacking
     t = clock()
     stack.prepare_spectra(wr, wlr, gs, wl=wl, dw=dw, dc=dc)
-    print("- prepare spectra: {}s".format(clock()-t))
-    # determine weights from SNR
+    print("- spectra preparation: {}s".format(clock()-t))
+    # determine common wavelength range
+    t = clock()
+    stack.determine_wavelength_range()
+    print("- wavelength range: {}".format(clock()-t))
+    # determine weights from signal-to-noise ratio at each pixel
     t = clock()
     stack.determine_weights()
     print("- determine weights: {}s".format(clock()-t))
+    print stack.weights
     # stack
     t = clock()
     stack.average()
     print("- stacking: {}s".format(clock()-t))
-
     # compute dispersion of the spectra in the stack using the jackknife method
     t = clock()
     stack.jackknife()
     print("- dispersion: {}s".format(clock()-t))
-
     # fit stacked spectrum with ppxf
     t = clock()
     stack.ppxffit(temp=tp)
     print("- ppxf fit: {}s".format(clock()-t))
-
     # compute SNR of stacked spectrum
     stack.signaltonoise(wlr)
-
+    print("- stack SNR = {}".format(stack.SNR))
     # plot results
     stack.plotStack()
     stack.plotFit()
