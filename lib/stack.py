@@ -6,17 +6,6 @@ from spectrum import Spectrum
 from ppxf import ppxf
 import ppxf_util as util
 import miles_util as lib
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-from matplotlib.ticker import MultipleLocator
-
-# setup matplotlib
-mpl.rcParams['text.usetex'] = True
-mpl.rcParams['text.latex.preamble'] = [
-       r'\usepackage{siunitx}',
-       r'\DeclareSIUnit\ergs{ergs}',
-       r'\sisetup{per-mode=symbol}'
-]
 
 # gaussian functions for emission line fitting
 # a: amplitude
@@ -379,6 +368,16 @@ class Stack:
         title:      plot title
     """
     def plotStack(self, filename=None, title=None):
+        import matplotlib as mpl
+        import matplotlib.pyplot as plt
+        from matplotlib.ticker import MultipleLocator
+        # setup matplotlib
+        mpl.rcParams['text.usetex'] = True
+        mpl.rcParams['text.latex.preamble'] = [
+               r'\usepackage{siunitx}',
+               r'\DeclareSIUnit\ergs{ergs}',
+               r'\sisetup{per-mode=symbol}'
+        ]
         wv = self.wave
         f, axes = plt.subplots(3, 1, sharex=True, figsize=(16, 9))
         if self.correction is not None:
@@ -414,6 +413,15 @@ class Stack:
         title:      plot title
     """
     def plotFit(self, filename=None, title=None):
+        import matplotlib as mpl
+        import matplotlib.pyplot as plt
+        # setup matplotlib
+        mpl.rcParams['text.usetex'] = True
+        mpl.rcParams['text.latex.preamble'] = [
+               r'\usepackage{siunitx}',
+               r'\DeclareSIUnit\ergs{ergs}',
+               r'\sisetup{per-mode=symbol}'
+        ]
         wv = self.pp.lam
         f, axes = plt.subplots(1, 1, figsize=(11.69,8.27))
         axes.plot(wv, self.pp.galaxy, 'b', label="stacked spectrum")
@@ -444,6 +452,15 @@ class Stack:
         plot of spectra with shared x-axis
     """
     def plotSpectra(self, indices, fl='flux', wl='loglam', wr=None, show=True, title=None, filename=None):
+        import matplotlib as mpl
+        import matplotlib.pyplot as plt
+        # setup matplotlib
+        mpl.rcParams['text.usetex'] = True
+        mpl.rcParams['text.latex.preamble'] = [
+               r'\usepackage{siunitx}',
+               r'\DeclareSIUnit\ergs{ergs}',
+               r'\sisetup{per-mode=symbol}'
+        ]
         f, axes = plt.subplots(len(indices), 1, figsize=(11.69,8.27), sharex=True)
         for (k, index) in enumerate(indices):
             sp = self.spectra[index]
