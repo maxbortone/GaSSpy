@@ -5,6 +5,7 @@ sys.path.append(path + "lib/")
 import numpy as np
 from stack import Stack
 import matplotlib as mpl
+import matplotlib.pyplot as plt
 
 mpl.rcParams['text.usetex'] = True
 mpl.rcParams['text.latex.preamble'] = [
@@ -12,6 +13,11 @@ mpl.rcParams['text.latex.preamble'] = [
        r'\DeclareSIUnit\ergs{ergs}',
        r'\sisetup{per-mode=symbol}'
 ]
+
+def chunks(l, n):
+    """Yield successive n-sized chunks from l."""
+    for i in range(0, len(l), n):
+        yield l[i:i + n]
 
 # import fits file and initialize stack
 # spectra_path = path + 'spectra_dustcorr/'
@@ -49,8 +55,16 @@ print("- weights: {}".format(clock()-t))
 t = clock()
 stack.average()
 print("- stacking: {}".format(clock()-t))
-# use Kroupa IMF
 t = clock()
-stack.ppxffit(temp=tp)
-print("- ppxf fit: {}".format(clock()-t))
-stack.plotFit()
+stack.jackknife()
+print("- dispersion: {}".format(clock()-t))
+
+x = np.arange(stack.N)
+l = chunks(x, 5)
+
+for j in l:
+    axes = stack.plotSpectra(j, fl="flux_interp", wl="lam_interp", title="Spectra {} - {}".format(j[0]+1, j[-1]+1), show=False)
+    for ax in axes:
+        ax.plot(stack.wave, stack.flux, alpha=0.5)
+        ax.plot(stack.wave, stack.dispersion, alpha=0.5)
+    plt.show()

@@ -15,6 +15,8 @@ spectra_path = path + 'SDSS_spectra/intermediate'
 # spectra_path = path + 'SDSS_spectra/old'
 
 spectra_files = [os.path.join(spectra_path, f) for f in os.listdir(spectra_path) if os.path.isfile(os.path.join(spectra_path, f))]
+print("Running signal-to-noise test on stack with {} spectra".format(len(spectra_files)))
+
 N = len(spectra_files)
 
 # wavelength regions for signal-to-noise analysis
@@ -34,10 +36,23 @@ gs = 1.0                            # grid spacing for interpolation
 wl = np.array([5577, 6300, 6363])   # sky lines for masking
 dw = 3                              # broadness of sky lines for masking
 dc = True                           # flag for dust correction
+
+t = clock()
 stack = Stack(spectra_files)
+print("- initialization: {}".format(clock()-t))
+t = clock()
 stack.prepare_spectra(wr, wlr, gs, wl=wl, dw=dw, dc=dc)
+print("- spectra preparation: {}".format(clock()-t))
+t = clock()
+stack.determine_wavelength_range()
+print("- wavelength range: {}".format(clock()-t))
+t = clock()
 stack.determine_weights()
+print("- weights: {}".format(clock()-t))
+t = clock()
 stack.average()
+print("- stacking: {}".format(clock()-t))
+
 SNRs_stack = stack.signaltonoise(wlr, flag=True)
 f, ax = plt.subplots(1, 1, figsize=(11.69, 8.27))
 for i in range(N):
@@ -60,9 +75,12 @@ ax.scatter((N/2)*np.ones(M), SNRs_stack, c=colors, marker='v')
 ax.scatter((N/2), stack.SNR, c='k', marker='*')
 ax.text((N/2)+0.2, stack.SNR, s="{:.2f}".format(stack.SNR))
 
-# weights = stack.weights / sum(stack.weights)
-S_approx = sum(stack.weights*signals)
-N_approx = np.sqrt(sum(stack.weights**2*(noises**2)))
+# weights = stack.weights / sum(stack.weights
+weights = np.zeros(stack.N)
+for i in range(stack.N):
+    weights[i] = np.median(stack.weights[i, :])
+S_approx = sum(weights*signals)
+N_approx = np.sqrt(sum(weights**2*(noises**2)))
 SNR_approx = S_approx / N_approx
 ax.scatter((N/2), SNR_approx, c='m', marker='*')
 ax.text((N/2)-1.2, SNR_approx, s="{:.2f}".format(SNR_approx))
