@@ -62,7 +62,7 @@ class Stack:
         # length of stacked spectrum
         self.M = None
         # weights by which each spectra is multiplied in the stacking process
-        self.weights = np.empty(self.N)
+        self.weights = None
         # stores the weighted sum of the spectra at each wavelength pixel
         self.P = None
         # stores the sum of the weights of the spectra at each wavelength pixel
@@ -131,38 +131,7 @@ class Stack:
             if self.masking:
                 sp.setmask(wl, dw)
 
-    """
-    Determine the weights for eah spectra in the stack from their SNR
-    """
-    def determine_weights(self):
-        for i in range(self.N):
-            sp = self.spectra[i]
-            self.weights[i] = sp.SNR
-        # normalize weights
-        self.weights = self.weights / sum(self.weights)
-
-    """
-    Calculate the weighted average of the stack
-
-    NOTE: run prepare_spectra and determine_weights before average!
-
-    OUTPUT:
-        lam:    wavelenghts of stacked spectrum
-        flux:   flux of stacked spectrum
-        error:  flux error of stacked spectrum
-        contrs: contributions from spectra to flux at each wavelength
-    """
-    def average(self):
-        # # set masking flag
-        # self.masking = (wl is not None) and (dw is not None)
-        # # prepare spectra
-        # for i in range(self.N):
-        #     sp = self.spectra[i]
-        #     sp.deredshift()
-        #     sp.normalize(wr, dc)
-        #     sp.interpolate(gs)
-        #     if self.masking:
-        #         sp.setmask(wl, dw)
+    def determine_wavelength_range(self):
         # find maximal common wavelength range limits
         w1 = self.spectra[0].lam_interp[0]
         w2 = self.spectra[0].lam_interp[-1]
@@ -179,6 +148,32 @@ class Stack:
             sp.rebase(w1, w2)
         # setup output arrays
         self.M = int(w2-w1+1)
+
+    """
+    Determine the weights for each spectra in the stack from their SNR
+    """
+    def determine_weights(self):
+        self.weights = np.zeros((self.N, self.M))
+        for i in range(self.N):
+            sp = self.spectra[i]
+            for j in range(self.M):
+                self.weights[i, j] = sp.flux_norm[i] / sp.error_norm[i]
+        for j in range(self.M):
+            # normalize weights
+            self.weights[:, j] = self.weights[:, j] / sum(self.weights[:, j])
+
+    """
+    Calculate the weighted average of the stack
+
+    NOTE: run prepare_spectra and determine_weights before average!
+
+    OUTPUT:
+        lam:    wavelenghts of stacked spectrum
+        flux:   flux of stacked spectrum
+        error:  flux error of stacked spectrum
+        contrs: contributions from spectra to flux at each wavelength
+    """
+    def average(self):
         lam = self.spectra[0].lam_interp
         flux = np.empty(self.M)
         error = np.empty(self.M)
@@ -197,9 +192,9 @@ class Stack:
                 if self.masking and sp.mask[i]:
                     c -= 1
                 else:
-                    p += sp.flux_interp[i] * self.weights[j]
-                    s += self.weights[j]
-                    n += sp.error_interp[i]**2 * self.weights[j]**2
+                    p += sp.flux_interp[i] * self.weights[j, i]
+                    s += self.weights[j, i]
+                    n += sp.error_interp[i]**2 * self.weights[j, i]**2
             if s == 0:
                 flux[i] = 0
             else:
@@ -229,7 +224,7 @@ class Stack:
             for j in range(self.N):
                 sp = self.spectra[j]
                 if not (self.masking and sp.mask[i]):
-                    w = self.weights[j]
+                    w = self.weights[j, i]
                     f = sp.flux_interp[i]
                     g += ((p*(s-w) - s*(p-w*f)) / (s*(s-w)))**2
             c = self.contributions[i]
@@ -496,7 +491,7 @@ class Stack:
             for j in range(self.N):
                 sp = self.spectra[j]
                 if not (self.masking and sp.mask[i]):
-                    w = self.weights[j]
+                    w = self.weights[j, i]
                     f = sp.flux_interp[i]
                     if s != w:
                         corr[i] += (p - w*f) / (s - w)
