@@ -451,6 +451,7 @@ class Stack:
     def plotSpectra(self, indices, fl='flux', wl='loglam', wr=None, show=True, title=None, filename=None):
         import matplotlib as mpl
         import matplotlib.pyplot as plt
+        from matplotlib.ticker import MultipleLocator
         # setup matplotlib
         mpl.rcParams['text.usetex'] = True
         mpl.rcParams['text.latex.preamble'] = [
@@ -461,23 +462,28 @@ class Stack:
         f, axes = plt.subplots(len(indices), 1, figsize=(11.69,8.27), sharex=True)
         for (k, index) in enumerate(indices):
             sp = self.spectra[index]
-            if isinstance(fl, basestring):
-                if fl is 'flux':
-                    flux = sp.flux
-                elif fl is 'flux_norm':
-                    flux = sp.flux_norm
-                elif fl is 'flux_interp':
-                    flux = sp.flux_interp
+            if fl is 'flux':
+                flux = sp.flux
+                error = sp.error
+            elif fl is 'flux_norm':
+                flux = sp.flux_norm
+                error = sp.error_norm
+            elif fl is 'flux_interp':
+                flux = sp.flux_interp
+                error = sp.error_interp
             if wl is 'loglam':
-                lam = sp.loglam
+                lam = 10**sp.loglam
             elif wl is 'loglam_dered':
-                lam = sp.loglam_dered
-            lam = 10**lam
+                lam = 10**sp.loglam_dered
+            elif wl is 'lam_interp':
+                lam = sp.lam_interp
             if wr:
                 idx = (lam >= wr[0]) & (lam <= wr[1])
                 axes[k].plot(lam[idx], flux[idx])
+                axes[k].plot(lam[idx], error[idx])
             else:
                 axes[k].plot(lam, flux)
+                axes[k].plot(lam, error)
             axes[k].yaxis.set_major_locator(MultipleLocator(1.0))
             axes[k].set_ylim(0.0, 2.0)
             axes[k].text(0.05, 0.85, "Spectrum: {}".format(index+1), verticalalignment="top", transform=axes[k].transAxes)
