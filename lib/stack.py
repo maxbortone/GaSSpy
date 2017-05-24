@@ -79,6 +79,8 @@ class Stack:
         self.contributions = None
         # dispersion of the sample at each wavelength pixel
         self.dispersion = None
+        # bias correction
+        self.correction = None
         # signal to noise ratio of the stacked spectrum
         self.SNR = None
         # MILES template that is being used for the ppxf fit
