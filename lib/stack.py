@@ -114,7 +114,8 @@ class Stack:
             sp.signaltonoise(wlr)
             sp.interpolate(gs)
             if (wl is not None) and (dw is not None):
-                sp.set_skylines(wl, dw)
+                sp.mask_skylines(wl, dw)
+            sp.mask_sigma_peaks()
 
     """
     Determine the largest common wavelength range for all spectra

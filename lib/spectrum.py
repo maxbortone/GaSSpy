@@ -1,5 +1,6 @@
 import numpy as np
 from astropy.io import fits
+from astropy.stats import sigma_clip
 
 class Spectrum:
     """
@@ -183,7 +184,7 @@ class Spectrum:
         wl: array of wavelengths to mask
         dw: emission line width to be masked
     """
-    def set_skylines(self, wl, dw):
+    def mask_skylines(self, wl, dw):
         # TODO: assert len(self.mask) == len(self.lam_interp)
         # convert wavelengths into redshift frame
         wl = wl / (1+self.z)
@@ -198,6 +199,15 @@ class Spectrum:
         ms = np.ma.mask_or(idx[0].mask, idx[1].mask)
         for i in range(len(idx)-2):
             ms = np.ma.mask_or(ms, idx[i+2].mask)
+        self.mask = np.ma.mask_or(self.mask, ms)
+
+    def mask_sigma_peaks(self, sigma=5):
+        sc = sigma_clip(self.flux_interp, sigma=sigma, iters=1)
+        ms = sc.mask
+        pk = np.flatnonzero(ms)
+        for p in pk:
+            if self.flux_interp[p] < 2:
+                ms[p] = False
         self.mask = np.ma.mask_or(self.mask, ms)
 
     """
