@@ -108,12 +108,6 @@ class Spectrum:
                 ivar = np.array(sp['ivar'])
                 np.place(ivar, ivar==0, np.nan)
                 sp['error'] = 1.0 / np.sqrt(ivar)
-            # TODO: keep both fluxes
-            # try:
-            #     sp['flux'] = sp.pop('flux_dustcorr')
-            # except:
-            #     pass
-            # add filename
             sp['filename'] = filename
             f.close()
             return sp
@@ -135,7 +129,7 @@ class Spectrum:
             wave = 10**self.loglam_dered
             idx = (wave >= wlr[i][0]) & (wave <= wlr[i][1])
             s = np.median(self.flux_norm[idx])
-            # use np.nanmean instead of mean since self.err == nan where self.ivar == 0
+            # use np.nanmedian instead of median since self.err == nan where self.ivar == 0
             if np.isnan(self.error_norm[idx]).all():
                 print "Warning: all NaN error in wavelength range {}-{}!".format(wlr[i][0], wlr[i][1])
                 n = np.nan
@@ -151,21 +145,13 @@ class Spectrum:
             return SNRs
 
     """
-    De-redshift spectrum using the redshift information
-    the fits file
+    De-redshift spectrum by redshift estimate @self.z
 
-    INPUT:
-        rs:     (optional) float representing a redshift estimation,
-                if set, rs will be used, otherwise self.z if it is defined
+    NOTE:
+        the log10 of 1+z is subtracted from the log10 wavelength in @self.loglam
     """
-    def deredshift(self, rs=None):
-        if rs is not None:
-            self.loglam_dered = self.loglam - np.log10(1+rs)
-        elif self.z is not None:
-            self.loglam_dered = self.loglam - np.log10(1+self.z)
-        else:
-            # TODO: handle exception
-            print('No redshift defined')
+    def deredshift(self):
+        self.loglam_dered = self.loglam - np.log10(1+self.z)
 
     """
     Normalize flux and noise by the mean flux over a wavelength interval [a, b]

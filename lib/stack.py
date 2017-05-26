@@ -25,12 +25,12 @@ def triple_gaussian(x, a1, c1, w1, a2, c2, w2, a3, c3, w3, y):
 class Stack:
     """
     Initialize stack with a list of spectra
+
     INPUT:
         filenames:  list of filenames of fits files or Spectrum class instances
         name:       name of the stack instance
     """
     def __init__(self, filenames, name=None):
-        # TODO: rename filenames and rewrite test
         if isinstance(filenames[0], Spectrum):
             self.spectra = filenames
             self.N = len(filenames)
@@ -57,8 +57,6 @@ class Stack:
         # wavelength pixels of stacked spectrum
         self.wave = None
         # flux of stacked spectrum
-        # TODO: define a working flux that can be set to the stacked flux
-        #  or the bias corrected one
         self.flux = None
         # flux error of stacked spectrum
         self.error = None
@@ -118,6 +116,9 @@ class Stack:
             if (wl is not None) and (dw is not None):
                 sp.set_skylines(wl, dw)
 
+    """
+    Determine the largest common wavelength range for all spectra
+    """
     def determine_wavelength_range(self):
         # find maximal common wavelength range limits
         w1 = self.spectra[0].lam_interp[0]
@@ -153,13 +154,9 @@ class Stack:
     """
     Calculate the weighted average of the stack
 
-    NOTE: run prepare_spectra and determine_weights before average!
-
-    OUTPUT:
-        lam:    wavelenghts of stacked spectrum
-        flux:   flux of stacked spectrum
-        error:  flux error of stacked spectrum
-        contrs: contributions from spectra to flux at each wavelength
+    NOTE:
+        run prepare_spectra, determine_wavelength_range and
+        determine_weights before average!
     """
     def average(self):
         lam = self.spectra[0].lam_interp
@@ -170,34 +167,33 @@ class Stack:
         S = np.empty(self.M)
         # stack spectra at each wavelength in the common range
         # according to mask of the spectra
-        for i in range(self.M):
+        for j in range(self.M):
             p = 0
             s = 0
             n = 0
             c = self.N
-            for j in range(self.N):
-                sp = self.spectra[j]
-                if sp.mask[i]:
+            for i in range(self.N):
+                sp = self.spectra[i]
+                if sp.mask[j]:
                     c -= 1
                 else:
-                    p += sp.flux_interp[i] * self.weights[j, i]
-                    s += self.weights[j, i]
-                    n += sp.error_interp[i]**2 * self.weights[j, i]**2
+                    p += sp.flux_interp[j] * self.weights[i, j]
+                    s += self.weights[i, j]
+                    n += sp.error_interp[j]**2 * self.weights[i, j]**2
             if s == 0:
-                flux[i] = 0
+                flux[j] = 0
             else:
-                P[i] = p
-                S[i] = s
-                flux[i] = p / s
-            error[i] = np.sqrt(n)
-            contrs[i] = c
+                P[j] = p
+                S[j] = s
+                flux[j] = p / s
+            error[j] = np.sqrt(n)
+            contrs[j] = c
         self.wave = lam
         self.flux = flux
         self.error = error
         self.contributions = contrs
         self.P = P
         self.S = S
-        return lam, flux, error, contrs
 
     """
     Use the jackknife method to estimate the dispersion in the sample
@@ -205,18 +201,18 @@ class Stack:
     def jackknife(self):
         # TODO: assert flux_interp and error_interp are not None
         disp = np.empty(self.M)
-        for i in range(self.M):
-            p = self.P[i]
-            s = self.S[i]
+        for j in range(self.M):
+            p = self.P[j]
+            s = self.S[j]
             g = 0
-            for j in range(self.N):
-                sp = self.spectra[j]
-                if not sp.mask[i]:
-                    w = self.weights[j, i]
-                    f = sp.flux_interp[i]
+            for i in range(self.N):
+                sp = self.spectra[i]
+                if not sp.mask[j]:
+                    w = self.weights[i, j]
+                    f = sp.flux_interp[j]
                     g += ((p*(s-w) - s*(p-w*f)) / (s*(s-w)))**2
-            c = self.contributions[i]
-            disp[i] = g * (c - 1) / c
+            c = self.contributions[j]
+            disp[j] = g * (c - 1) / c
         self.dispersion = np.sqrt(disp)
         if self.dispersion.mean() > 0.01*self.flux.mean():
             # TODO: look into
@@ -234,6 +230,9 @@ class Stack:
     INPUT:
         wlr: list or array of wavelength regions where to compute the SNR
         flag: boolean, if True outputs SNR value in each wavelength region
+    OUTPUT:
+        if @flag is set to True it returns the signal-to-noise ratios in the
+        wavelength regions defined in @wlr
     """
     def signaltonoise(self, wlr, flag=False):
         m = wlr.shape[0]
@@ -331,7 +330,7 @@ class Stack:
         # the quality of the fit
         delta = 0.004       # regularization error
         # fit stacked spectrum with ppxf
-        # NOTES:
+        # NOTE:
         #   - dv is necessary as the galaxy and the template do not have the
         #     same starting wavelength and therefore a velocity shift is
         #     applied to the template. All velocities are measured with respect
@@ -363,6 +362,8 @@ class Stack:
     INPUT:
         filename:   plot filename
         title:      plot title
+    OUTPUT:
+        plot of stacked spectra
     """
     def plotStack(self, filename=None, title=None):
         import matplotlib as mpl
@@ -408,6 +409,8 @@ class Stack:
     INPUT:
         filename:   plot filename
         title:      plot title
+    OUTPUT:
+        plot of bestfit spectra obtained from ppxf
     """
     def plotFit(self, filename=None, title=None):
         import matplotlib as mpl
@@ -506,18 +509,18 @@ class Stack:
     """
     def _correct(self):
         corr = np.zeros(self.M)
-        for i in range(self.M):
-            p = self.P[i]
-            s = self.S[i]
-            c = self.contributions[i]
-            for j in range(self.N):
-                sp = self.spectra[j]
-                if not sp.mask[i]:
-                    w = self.weights[j, i]
-                    f = sp.flux_interp[i]
+        for j in range(self.M):
+            p = self.P[j]
+            s = self.S[j]
+            c = self.contributions[j]
+            for i in range(self.N):
+                sp = self.spectra[i]
+                if not sp.mask[j]:
+                    w = self.weights[i, j]
+                    f = sp.flux_interp[j]
                     if s != w:
-                        corr[i] += (p - w*f) / (s - w)
-            corr[i] = (c-1)*(corr[i]/c - self.flux[i])
+                        corr[j] += (p - w*f) / (s - w)
+            corr[j] = (c-1)*(corr[j]/c - self.flux[j])
         self.correction = corr
         self.flux -= self.correction
 
@@ -529,9 +532,10 @@ class Stack:
     INPUT:
         logLam:         natural logarithm np.log(wave) of the wavelength in
                         Angstrom of each pixel of the log rebinned galaxy spectrum
-        lamRangeTemp:   two elements vectors [lamMin2, lamMax2] with the minimum
+        lamRangeTemp:   two elements vectors [lamMin, lamMax] with the minimum
                         and maximum wavelength in Angstrom in the stellar template used in PPXF
         z:              estimate of the galaxy redshift
+        refit:          bool, wheter the ppxf fit is being run a second time or not
     OUTPUT:
         goodpixels:     vector of goodPixels to be used as input for PPXF
     """
@@ -572,21 +576,21 @@ class Stack:
     OUTPUT:
         detected:   boolean or array of booleans, True if peak was detected
     """
-    def _detect_peak(self, x, y, pk):
-        if isinstance(pk, float):
-            pk = [pk]
-        detected = np.zeros_like(pk, dtype=bool)
+    def _detect_peak(self, x, y, lines):
+        if isinstance(lines, float):
+            lines = [lines]
+        detected = np.zeros_like(lines, dtype=bool)
         # select 20 pixel intervall around emission line
-        idx = (x >= pk[0]-20) & (x <= pk[-1]+20)
+        idx = (x >= lines[0]-20) & (x <= lines[-1]+20)
         x = x[idx]
         y = y[idx]
         sc = sigma_clip(y, sigma=1, iters=None)
         py = sc.data[sc.mask]
         px = x[sc.mask]
-        for i in range(len(pk)):
+        for i in range(len(lines)):
             # check if there is a peak within 3 pixels from emission line
             # and if it is positive
-            pidx = (px >= pk[i] - 3) & (px <= pk[i] + 3)
+            pidx = (px >= lines[i] - 3) & (px <= lines[i] + 3)
             if pidx.any() and (py[pidx] > 0).all():
                 detected[i] = True
         if len(detected) == 1:
@@ -816,7 +820,6 @@ if __name__ == "__main__":
     t = clock()
     stack.determine_weights()
     print("- determine weights: {}s".format(clock()-t))
-    print stack.weights
     # stack
     t = clock()
     stack.average()
