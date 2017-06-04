@@ -74,6 +74,8 @@ class Stack:
         self.pp = None
         # difference between stacked spectrum and ppxf bestfit
         self.residual = None
+        # list of gaussian fits to emission lines in the residual
+        self.gaussians = None
         # weights by which each template was multiplied to best fit
         # the stacked spectrum
         self.temp_weights = None
@@ -283,12 +285,13 @@ class Stack:
         z = 0.0
 
         if refit:
-            # TODO: assert ppxf fit has already been done once
+            if self.gaussians == None:
+                self._fit_residual()
             # galaxy spectrum is already in same wavelength range as stellar library
             wave = np.array(self.pp.lam)
             flux = np.array(self.pp.galaxy)
-            residual = np.array(self.residual)
-            flux, gaussians = self._subtract_residual(wave, flux, residual)
+            for g in self.gaussians:
+                flux[g[2]] -= g[1]
             # only compute velocity scale for ppxf since flux was already log-rebinned
             # (copied from log_rebin function in ppxf_util.py)
             n = len(flux)
@@ -354,8 +357,6 @@ class Stack:
         self.pp.lam = np.exp(loglam)
         self.temp_weights = temp_weights
         self.residual = self.pp.galaxy - self.pp.bestfit
-        if refit:
-            self.gaussians = gaussians
 
     """
     Plot stacked spectrum, noise, dispersion and bias correction
@@ -600,41 +601,29 @@ class Stack:
             return detected
 
     """
-    Subtract residual from stacked spectrum at emission lines by fitting detected
-    peaks with gaussians
-
-    INPUT:
-        wv:     array containing the wavelength coordinate of the spectrum
-        fl:     array containing the flux coordinate of the spectrum
-        rs:     array containing the residual to the bestfit of the spectrum
-
-    OUTPUT:
-        fl_corr:    array containing the residual subtracted flux
-        gaussians:  list of fitted gaussians
+    Fit residual spectrum at emission lines with gaussians
     """
-    def _subtract_residual(self, wv, fl, rs):
-        fl_corr = np.array(fl)
+    def _fit_residual(self):
+        wv = self.pp.lam
+        rs = self.residual
         gaussians = []
         for el in self.emlines:
             if isinstance(el, tuple):
                 line = el[1]
                 gwv, gs, idx = self._fit_singlet(wv, rs, line)
                 if gs is not None:
-                    fl_corr[idx] -= gs
-                    gaussians.append(np.array([gwv, gs]))
+                    gaussians.append(np.array([gwv, gs, idx]))
             elif isinstance(el, list) and len(el) == 2:
                 doublet = [el[0][1], el[1][1]]
                 gwv, gs, idx = self._fit_doublet(wv, rs, doublet)
                 if gs is not None:
-                    fl_corr[idx] -= gs
-                    gaussians.append(np.array([gwv, gs]))
+                    gaussians.append(np.array([gwv, gs, idx]))
             elif isinstance(el, list) and len(el) == 3:
                 triplet = [el[0][1], el[1][1], el[2][1]]
                 gwv, gs, idx = self._fit_triplet(wv, rs, triplet)
                 if gs is not None:
-                    fl_corr[idx] -= gs
-                    gaussians.append(np.array([gwv, gs]))
-        return fl_corr, gaussians
+                    gaussians.append(np.array([gwv, gs, idx]))
+        self.gaussians = gaussians
 
     """
     Fit a signal around @line with a simple gaussian curve
