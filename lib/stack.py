@@ -1,6 +1,8 @@
 import os
 import numpy as np
 from scipy.optimize import curve_fit
+from scipy.integrate import quad
+from scipy.special import erf
 from astropy.stats import sigma_clip
 from spectrum import Spectrum
 from ppxf import ppxf
@@ -75,7 +77,7 @@ class Stack:
         # difference between stacked spectrum and ppxf bestfit
         self.residual = None
         # list of gaussian fits to emission lines in the residual
-        self.gaussians = None
+        self.gaussians = {}
         # weights by which each template was multiplied to best fit
         # the stacked spectrum
         self.temp_weights = None
@@ -285,13 +287,13 @@ class Stack:
         z = 0.0
 
         if refit:
-            if self.gaussians == None:
+            if len(self.gaussians) == 0:
                 self._fit_residual()
             # galaxy spectrum is already in same wavelength range as stellar library
             wave = np.array(self.pp.lam)
             flux = np.array(self.pp.galaxy)
-            for g in self.gaussians:
-                flux[g[2]] -= g[1]
+            for g in self.gaussians.values():
+                flux[g['idx']] -= g['gs']
             # only compute velocity scale for ppxf since flux was already log-rebinned
             # (copied from log_rebin function in ppxf_util.py)
             n = len(flux)
@@ -357,6 +359,13 @@ class Stack:
         self.pp.lam = np.exp(loglam)
         self.temp_weights = temp_weights
         self.residual = self.pp.galaxy - self.pp.bestfit
+
+    def analyze_residual(self):
+        if len(self.gaussians) == 0:
+            # detect and fit emission lines in residual
+            self._fit_residual()
+        # integrate detected emission lines
+        self._integrate_gaussians()
 
     """
     Plot stacked spectrum, noise, dispersion and bias correction
@@ -606,24 +615,19 @@ class Stack:
     def _fit_residual(self):
         wv = self.pp.lam
         rs = self.residual
-        gaussians = []
         for el in self.emlines:
             if isinstance(el, tuple):
                 line = el[1]
-                gwv, gs, idx = self._fit_singlet(wv, rs, line)
-                if gs is not None:
-                    gaussians.append(np.array([gwv, gs, idx]))
+                name = el[0]
+                self._fit_singlet(wv, rs, line, name)
             elif isinstance(el, list) and len(el) == 2:
                 doublet = [el[0][1], el[1][1]]
-                gwv, gs, idx = self._fit_doublet(wv, rs, doublet)
-                if gs is not None:
-                    gaussians.append(np.array([gwv, gs, idx]))
+                name = el[0][0] + '_' + el[1][0]
+                self._fit_doublet(wv, rs, doublet, name)
             elif isinstance(el, list) and len(el) == 3:
                 triplet = [el[0][1], el[1][1], el[2][1]]
-                gwv, gs, idx = self._fit_triplet(wv, rs, triplet)
-                if gs is not None:
-                    gaussians.append(np.array([gwv, gs, idx]))
-        self.gaussians = gaussians
+                name = el[0][0] + '_' + el[1][0] + '_' + el[2][0]
+                self._fit_triplet(wv, rs, triplet, name)
 
     """
     Fit a signal around @line with a simple gaussian curve
@@ -632,13 +636,8 @@ class Stack:
         x:     array containing the x coordinate of the signal
         y:     array containing the y coordinate of the signal
         line:  float, wavelength around which fit should be performed
-
-    OUTPUT:
-        gx:    array containing the x coordinate of the gaussian
-        gy:    array containing the y coordinate of the gaussian
-        idx:   array containing the indices of the fit
     """
-    def _fit_singlet(self, x, y, line):
+    def _fit_singlet(self, x, y, line, name):
         gx = None
         gs = None
         idx = None
@@ -654,9 +653,12 @@ class Stack:
                     popt, pcov = curve_fit(gaussian, gx-line, gy, p0=params)
                 except RuntimeError as err:
                     print("Curve fitting the line at {} raised runtime error: {}".format(line, err))
+                    return
                 else:
                     gs = gaussian(gx-line, *popt)
-        return gx, gs, idx
+                    self.gaussians[name] = {'type': 'singlet', 'line': line,
+                                            'popt': popt, 'pcov': pcov,
+                                            'idx': idx, 'gx': gx, 'gs': gs}
 
     """
     Fit a signal around between the lines in @doublet with a double gaussian curve
@@ -666,13 +668,8 @@ class Stack:
         y:        array containing the y coordinate of the signal
         doublet:  list containing the wavelenghts of the lines around which
                   the fit should be performed (in ascending order)
-
-    OUTPUT:
-        gx:    array containing the x coordinate of the gaussian
-        gy:    array containing the y coordinate of the gaussian
-        idx:   array containing the indices of the fit
     """
-    def _fit_doublet(self, x, y, doublet):
+    def _fit_doublet(self, x, y, doublet, name):
         gx = None
         gs = None
         idx = None
@@ -690,13 +687,18 @@ class Stack:
                 except RuntimeError as err:
                     print("Curve fitting the doublet at {}-{} raised runtime error: {}"
                           .format(doublet[0], doublet[1], err))
+                    return
                 else:
                     gs = double_gaussian(gx-np.mean(doublet), *popt)
+                    self.gaussians[name] = {'type': 'doublet', 'line': np.mean(doublet),
+                                            'popt': popt, 'pcov': pcov,
+                                            'idx': idx, 'gx': gx, 'gs': gs}
             if det[0] and not det[1]:
-                gx, gs, idx = self._fit_singlet(x, y, doublet[0])
+                name = name.split('_')[0]
+                self._fit_singlet(x, y, doublet[0], name)
             if det[1] and not det[0]:
-                gx, gs, idx = self._fit_singlet(x, y, doublet[1])
-        return gx, gs, idx
+                name = name.split('_')[1]
+                self._fit_singlet(x, y, doublet[1], name)
 
     """
     Fit a signal around @line with a simple gaussian curve
@@ -706,13 +708,8 @@ class Stack:
         y:        array containing the y coordinate of the signal
         triplet:  list containing the wavelenghts of the lines around which
                   the fit should be performed (in ascending order)
-
-    OUTPUT:
-        gx:    array containing the x coordinate of the gaussian
-        gy:    array containing the y coordinate of the gaussian
-        idx:   array containing the indices of the fit
     """
-    def _fit_triplet(self, x, y, triplet):
+    def _fit_triplet(self, x, y, triplet, name):
         gx = None
         gs = None
         idx = None
@@ -730,19 +727,68 @@ class Stack:
                 except RuntimeError as err:
                     print("Curve fitting the triplet at {}-{}-{} raised runtime error: {}"
                           .format(triplet[0], triplet[1], triplet[2], err))
+                    return
                 else:
                     gs = triple_gaussian(gx-triplet[1], *popt)
+                    self.gaussians[name] = {'type': 'triplet', 'line': triplet[1],
+                                            'popt': popt, 'pcov': pcov,
+                                            'idx': idx, 'gx': gx, 'gs': gs}
             if (det[0] and det[1]) and not det[2]:
-                gx, gs, idx = self._fit_doublet(x, y, [triplet[0], triplet[1]])
+                name = name.split('_')[0] + '_' + name.split('_')[1]
+                self._fit_doublet(x, y, [triplet[0], triplet[1]], name)
             if (det[1] and det[2]) and not det[0]:
-                gx, gs, idx = self._fit_doublet(x, y, [triplet[1], triplet[2]])
+                name = name.split('_')[1] + '_' + name.split('_')[2]
+                self._fit_doublet(x, y, [triplet[1], triplet[2]], name)
             if det[0] and (not det[1] and not det[2]):
-                gx, gs, idx = self._fit_singlet(x, y, triplet[0])
+                name = name.split('_')[0]
+                self._fit_singlet(x, y, triplet[0], name)
             if det[1] and (not det[2] and not det[0]):
-                gx, gs, idx = self._fit_singlet(x, y, triplet[1])
+                name = name.split('_')[1]
+                self._fit_singlet(x, y, triplet[1], name)
             if det[2] and (not det[0] and not det[1]):
-                gx, gs, idx = self._fit_singlet(x, y, triplet[2])
-        return gx, gs, idx
+                name = name.split('_')[2]
+                self._fit_singlet(x, y, triplet[2], name)
+
+    """
+    Compute the total flux of the detected emission lines by integrating the
+    gaussian fitting curves. Also estimate the error on the integral by propagating
+    the errors on the fitting parameters through the analytic solution of the integral
+
+    NOTE:
+        scipy.integrate.quad gives same result as analytic solutions for the integrals
+        of gaussian, double_gaussian and triple_gaussian functions
+    """
+    def _integrate_gaussians(self):
+        for g in self.gaussians.values():
+            if g['type'] == 'singlet':
+                integrand = lambda x, p: gaussian(x, *p)
+            elif g['type'] == 'doublet':
+                integrand = lambda x, p: double_gaussian(x, *p)
+            elif g['type'] == 'triplet':
+                integrand = lambda x, p: triple_gaussian(x, *p)
+            a = g['gx'][0] - g['line']
+            b = g['gx'][-1] - g['line']
+            # parameters are defined as:
+            # - singlet: [a, c, w, y]
+            # - doublet: [a1, c1, w1, a2, c2, w2, y]
+            # - triplet: [a1, c1, w1, a2, c2, w2, a3, c3, w3, y]
+            # where a is amplitude, c is centroid, w is width and y is offset
+            p = g['popt']
+            g['integral'] = quad(integrand, a, b, args=(p,))[0]
+            # compute parameter errors from covariance matrix of gaussian fit
+            e = np.sqrt(np.diag(g['pcov']))
+            e_acw = 0
+            for i in range(len(e)/3):
+                ia = i*3
+                ic = ia+1
+                iw = ia+2
+                e_a = (erf((b-p[ic])/(np.sqrt(2)*p[iw])) - erf((a-p[ic])/(np.sqrt(2)*p[iw])))/2
+                e_c = p[ia]*(-np.sqrt(2/(np.pi*p[iw]))*np.exp(-((b-p[ic])/(np.sqrt(2)*p[iw]))**2)
+                            +np.sqrt(2/(np.pi*p[iw]))*np.exp(-((a-p[ic])/(np.sqrt(2)*p[iw]))**2))/2
+                e_w = p[ia]*(-np.sqrt(2/np.pi)*((b-p[ic])/(p[iw]**2))*np.exp(-((b-p[ic])/(np.sqrt(2)*p[iw]))**2)
+                            +np.sqrt(2/np.pi)*((a-p[ic])/(p[iw]**2))*np.exp(-((a-p[ic])/(np.sqrt(2)*p[iw]))**2))/2
+                e_acw += (e_a*e[ia])**2 + (e_c*e[ic])**2 + (e_w*e[iw])**2
+            g['integral_error'] = np.sqrt(e_acw + ((b-a)*e[-1])**2)
 
 # TODO: rewrite for parallelization
 """

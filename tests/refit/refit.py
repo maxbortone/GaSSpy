@@ -93,6 +93,9 @@ lam1 = np.array(stack.pp.lam)
 t = clock()
 stack.ppxffit(temp=tp, refit=True)
 print("- ppxf refit: {}".format(clock()-t))
+t = clock()
+stack.analyze_residual()
+print("- analyze residual: {}".format(clock()-t))
 
 galaxy2 = np.array(stack.pp.galaxy)
 bestfit2 = np.array(stack.pp.bestfit)
@@ -113,10 +116,10 @@ lineid_plot.plot_line_ids(stack.wave, stack.flux, emlines, emlabels, ax=ax0, max
 for i, line in enumerate(emlines):
     ax0.axvline(line, color='k', linewidth=1, linestyle='--')
     ax1.axvline(line, color='k', linewidth=1, linestyle='--')
-for i in range(len(gaussians)):
-    wv = gaussians[i][0]
-    gs = gaussians[i][1]
-    ax0.plot(wv, gs, 'lightblue')
+for (key, val) in gaussians.items():
+    print("\t{}:".format(key))
+    print("\t\tI = {:.4f} +- {:.4f}".format(val['integral'], val['integral_error']))
+    ax0.plot(val['gx'], val['gs'], 'lightblue')
 handle_gaussian = mlines.Line2D([], [], color='lightblue', markersize=15, label="gaussian")
 ax0.set_ylabel(r"flux [\SI{e-17}{\ergs\per\second\per\square\centi\meter\per\angstrom}]")
 ax1.set_ylabel(r"flux [\SI{e-17}{\ergs\per\second\per\square\centi\meter\per\angstrom}]")
