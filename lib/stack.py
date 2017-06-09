@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from scipy.optimize import curve_fit
+from scipy.interpolate import splrep, splev
 from scipy.integrate import quad
 from scipy.special import erf
 from astropy.stats import sigma_clip
@@ -22,6 +23,23 @@ def double_gaussian(x, a1, c1, w1, a2, c2, w2, y):
 
 def triple_gaussian(x, a1, c1, w1, a2, c2, w2, a3, c3, w3, y):
     return gaussian(x, a1, c1, w1, 0.0) + gaussian(x, a2, c2, w2, 0.0) + gaussian(x, a3, c3, w3, 0.0) + y
+
+def Fitzpatrick_EC(wavelength):
+    '''
+    Fitzpatrick (1999, PASP, 111, 63) extinction curve
+    Input:
+        wavelength: wavelength in angstrom
+    Output:
+        k(lambda) = A(lambda)/E(B-V)
+    '''
+    w_anchor_f99 = np.array([np.inf, 26500., 12200., 6000., 5470.,
+                             4670., 4110., 2700., 2600.])  # angstrom
+    wnumber_anchor_f99 = 1./(w_anchor_f99 * 1.e-4)  # 1/micron
+    alam_ebv_anchor_f99 = np.array([0., 0.265, 0.829, 2.688, 3.055,
+                                    3.806, 4.315, 6.265, 6.591])
+    tck_f99 = splrep(wnumber_anchor_f99, alam_ebv_anchor_f99, k=3)
+    alam_ebv_f99 = splev(1./(wavelength*1e-4), tck_f99, ext=2)
+    return alam_ebv_f99
 
 
 class Stack:
@@ -367,6 +385,43 @@ class Stack:
         # integrate detected emission lines
         self._integrate_gaussians()
 
+    def attenuate_dust(self):
+        # compute color excess of gas
+        # - H_alpha can be detected as singlet, doublet with NII or as triplet
+        #   with NII on the left and on the right
+        # - H_beta is detected as singlet
+        g_Ha = None
+        g_Hb = None
+        for (key, val) in self.gaussians.items():
+            if 'H_alpha' in key:
+                g_Ha = val
+            if 'H_beta' in key:
+                g_Hb = val
+        if g_Ha == None and g_Hb == None:
+            print("No emission lines detected.")
+            return
+        elif g_Ha == None:
+            print("No H_alpha line detected.")
+            return
+        elif g_Hb == None:
+            print("No H_beta line detected.")
+            return
+        if g_Ha['type'] == 'singlet':
+            F_Ha = g_Ha['popt'][0]
+        elif g_Ha['type'] == 'doublet':
+            F_Ha = g_Ha['popt'][0]
+        elif g_Ha['type'] == 'triplet':
+            F_Ha = g_Ha['popt'][3]
+        F_Hb = g_Hb['popt'][0]
+        E_gas = 1.97*np.log10(F_Ha/F_Hb/2.86)
+        # compute color excess of stars
+        E_stars = 0.44*E_gas
+        # correct flux with Fitzpatrick extinction curve
+        correction = 0.4*E_stars*Fitzpatrick_EC(self.wave)
+        self.flux *= 10**(correction)
+        idx = (self.wave >= 4100) & (self.wave <= 4700)
+        self.flux /= np.median(self.flux[idx])
+
     """
     Plot stacked spectrum, noise, dispersion and bias correction
 
@@ -622,11 +677,11 @@ class Stack:
                 self._fit_singlet(wv, rs, line, name)
             elif isinstance(el, list) and len(el) == 2:
                 doublet = [el[0][1], el[1][1]]
-                name = el[0][0] + '_' + el[1][0]
+                name = el[0][0] + '-' + el[1][0]
                 self._fit_doublet(wv, rs, doublet, name)
             elif isinstance(el, list) and len(el) == 3:
                 triplet = [el[0][1], el[1][1], el[2][1]]
-                name = el[0][0] + '_' + el[1][0] + '_' + el[2][0]
+                name = el[0][0] + '-' + el[1][0] + '-' + el[2][0]
                 self._fit_triplet(wv, rs, triplet, name)
 
     """
@@ -694,10 +749,10 @@ class Stack:
                                             'popt': popt, 'pcov': pcov,
                                             'idx': idx, 'gx': gx, 'gs': gs}
             if det[0] and not det[1]:
-                name = name.split('_')[0]
+                name = name.split('-')[0]
                 self._fit_singlet(x, y, doublet[0], name)
             if det[1] and not det[0]:
-                name = name.split('_')[1]
+                name = name.split('-')[1]
                 self._fit_singlet(x, y, doublet[1], name)
 
     """
@@ -734,19 +789,19 @@ class Stack:
                                             'popt': popt, 'pcov': pcov,
                                             'idx': idx, 'gx': gx, 'gs': gs}
             if (det[0] and det[1]) and not det[2]:
-                name = name.split('_')[0] + '_' + name.split('_')[1]
+                name = name.split('-')[0] + '-' + name.split('-')[1]
                 self._fit_doublet(x, y, [triplet[0], triplet[1]], name)
             if (det[1] and det[2]) and not det[0]:
-                name = name.split('_')[1] + '_' + name.split('_')[2]
+                name = name.split('-')[1] + '-' + name.split('-')[2]
                 self._fit_doublet(x, y, [triplet[1], triplet[2]], name)
             if det[0] and (not det[1] and not det[2]):
-                name = name.split('_')[0]
+                name = name.split('-')[0]
                 self._fit_singlet(x, y, triplet[0], name)
             if det[1] and (not det[2] and not det[0]):
-                name = name.split('_')[1]
+                name = name.split('-')[1]
                 self._fit_singlet(x, y, triplet[1], name)
             if det[2] and (not det[0] and not det[1]):
-                name = name.split('_')[2]
+                name = name.split('-')[2]
                 self._fit_singlet(x, y, triplet[2], name)
 
     """
