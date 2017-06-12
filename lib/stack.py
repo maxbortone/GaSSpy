@@ -293,14 +293,14 @@ class Stack:
         # SDSS instrumental resolution
         FWHM_gal = 2.76
         # path to miles stellar library
-        path = os.path.dirname(__file__).split('lib')[0] + 'miles_models/'
+        path = os.path.join(os.path.dirname(__file__), 'miles_models')
         templates = {
             'default': 'MILES_default/Mun1.30*.fits',
             'kb': 'MILES_Padova00_kb/Mkb1.30*.fits',
             'ku': 'MILES_Padova00_ku/Mku1.30*.fits',
             'un': 'MILES_Padova00_un/Mun1.30*.fits'
         }
-        miles_path = path + templates[temp]
+        miles_path = os.path.join(path, templates[temp])
         self.template = temp
         # redshift is set to zero since stacked spectrum is calculated
         # in rest frame
