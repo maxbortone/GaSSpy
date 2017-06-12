@@ -65,7 +65,7 @@ class Stack:
             self.N = 0
         # initialize attributes
         # name of the stack
-        self.name = None
+        self.name = name
         # length of stacked spectrum
         self.M = None
         # weights by which each spectra is multiplied in the stacking process
@@ -245,9 +245,9 @@ class Stack:
             #   - continuum at 6800-7200
             # give out percentage difference
             if self.name:
-                print("Warning: sample dispersion of {} is high".format(self.name))
+                print("{}: sample dispersion is high".format(self.name))
             else:
-                print("Warning: sample dispersion is high")
+                print("Sample dispersion is high")
 
     """
     Computes the signal-to-noise ratio of the stacked spectrum
@@ -437,18 +437,30 @@ class Stack:
             if 'H_beta' in key:
                 F_Hb = val[0]
         if F_Ha == None and F_Hb == None:
-            print("No emission lines detected.")
+            if self.name:
+                print("{}: no emission lines detected.".format(self.name))
+            else:
+                print("No emission lines detected.")
             return
         elif F_Ha == None:
-            print("No H_alpha line detected.")
+            if self.name:
+                print("{}: no H_alpha line detected.".format(self.name))
+            else:
+                print("No H_alpha line detected.")
             return
         elif F_Hb == None:
-            print("No H_beta line detected.")
+            if self.name:
+                print("{}: no H_beta lines detected.".format(self.name))
+            else:
+                print("No H_beta line detected.")
             return
         E_gas = 1.97*np.log10(F_Ha/F_Hb/2.86)
         # compute color excess of stars
         E_stars = 0.44*E_gas
-        print("\t dust attenuation: {}".format(E_stars))
+        if self.name:
+            print("{}: dust attenuation: {}".format(self.name, E_stars))
+        else:
+            print("\t dust attenuation: {}".format(E_stars))
         # correct flux with Fitzpatrick extinction curve
         correction = 0.4*E_stars*Fitzpatrick_EC(self.wave)
         self.flux *= 10**(correction)
@@ -711,7 +723,10 @@ class Stack:
         idx = None
         if line >= x[0] and line <= x[-1]:
             det = self._detect_peak(x, y, line)
-            print("\tpeak at: {} = {}".format(line, det))
+            if self.name:
+                print("{}: peak at: {} = {}".format(self.name, line, det))
+            else:
+                print("\tpeak at: {} = {}".format(line, det))
             if det:
                 idx = (x >= line - 10) & (x <= line + 10)
                 gx = x[idx]
@@ -720,7 +735,11 @@ class Stack:
                 try:
                     popt, pcov = curve_fit(gaussian, gx-line, gy, p0=params)
                 except RuntimeError as err:
-                    print("Curve fitting the line at {} raised runtime error: {}".format(line, err))
+                    if self.name:
+                        print("{}: curve fitting the line at {} raised runtime error: {}"
+                               .format(self.name,line, err))
+                    else:
+                        print("Curve fitting the line at {} raised runtime error: {}".format(line, err))
                     return
                 else:
                     gs = gaussian(gx-line, *popt)
@@ -743,7 +762,11 @@ class Stack:
         idx = None
         if doublet[0] >= x[0] and doublet[1] <= x[-1]:
             det = self._detect_peak(x, y, doublet)
-            print("\tpeak at: {} = {}, {} = {}".format(doublet[0], det[0], doublet[1], det[1]))
+            if self.name:
+                print("{}: peak at: {} = {}, {} = {}"
+                       .format(self.name, doublet[0], det[0], doublet[1], det[1]))
+            else:
+                print("\tpeak at: {} = {}, {} = {}".format(doublet[0], det[0], doublet[1], det[1]))
             if det[0] and det[1]:
                 idx = (x >= doublet[0] - 10) & (x <= doublet[1] + 10)
                 gx = x[idx]
@@ -753,8 +776,12 @@ class Stack:
                 try:
                     popt, pcov = curve_fit(double_gaussian, gx-np.mean(doublet), gy, p0=params)
                 except RuntimeError as err:
-                    print("Curve fitting the doublet at {}-{} raised runtime error: {}"
-                          .format(doublet[0], doublet[1], err))
+                    if self.name:
+                        print("{}: curve fitting the doublet at {}-{} raised runtime error: {}"
+                               .format(self.name, doublet[0], doublet[1], err))
+                    else:
+                        print("Curve fitting the doublet at {}-{} raised runtime error: {}"
+                              .format(doublet[0], doublet[1], err))
                     return
                 else:
                     gs = double_gaussian(gx-np.mean(doublet), *popt)
@@ -783,7 +810,11 @@ class Stack:
         idx = None
         if triplet[0] >= x[0] and triplet[2] <= x[-1]:
             det = self._detect_peak(x, y, triplet)
-            print("\tpeak at: {} = {}, {} = {}, {} = {}".format(triplet[0], det[0], triplet[1], det[1], triplet[2], det[2]))
+            if self.name:
+                print("{}: peak at: {} = {}, {} = {}, {} = {}"
+                       .format(self.name, triplet[0], det[0], triplet[1], det[1], triplet[2], det[2]))
+            else:
+                print("\tpeak at: {} = {}, {} = {}, {} = {}".format(triplet[0], det[0], triplet[1], det[1], triplet[2], det[2]))
             if det.all():
                 idx = (x >= triplet[0] - 10) & (x <= triplet[2] + 10)
                 gx = x[idx]
@@ -793,8 +824,12 @@ class Stack:
                 try:
                     popt, pcov = curve_fit(triple_gaussian, gx-triplet[1], gy, p0=params)
                 except RuntimeError as err:
-                    print("Curve fitting the triplet at {}-{}-{} raised runtime error: {}"
-                          .format(triplet[0], triplet[1], triplet[2], err))
+                    if self.name:
+                        print("{}: curve fitting the triplet at {}-{}-{} raised runtime error: {}"
+                               .format(self.name, triplet[0], triplet[1], triplet[2], err))
+                    else:
+                        print("Curve fitting the triplet at {}-{}-{} raised runtime error: {}"
+                               .format(triplet[0], triplet[1], triplet[2], err))
                     return
                 else:
                     gs = triple_gaussian(gx-triplet[1], *popt)
