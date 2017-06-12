@@ -57,11 +57,14 @@ print("- ppxf fit: {}".format(clock()-t))
 galaxy1 = np.array(stack.flux)
 
 t = clock()
-stack.analyze_residual()
-print("- analyze residual: {}".format(clock()-t))
+stack.fit_residual()
+print("- fit residual: {}".format(clock()-t))
 t = clock()
-stack.attenuate_dust()
-print("- dust attenuation: {}".format(clock()-t))
+stack.set_emlines_flux()
+print("- set emission lines flux: {}".format(clock()-t))
+t = clock()
+stack.correct_dust_attenuation()
+print("- correct dust attenuation: {}".format(clock()-t))
 
 galaxy2 = np.array(stack.flux)
 

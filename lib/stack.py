@@ -94,7 +94,7 @@ class Stack:
         self.pp = None
         # difference between stacked spectrum and ppxf bestfit
         self.residual = None
-        # list of gaussian fits to emission lines in the residual
+        # gaussian fits to emission lines in the residual
         self.gaussians = {}
         # weights by which each template was multiplied to best fit
         # the stacked spectrum
@@ -113,6 +113,8 @@ class Stack:
                         ('OIII', 4960.295), ('OIII', 5008.24), ('OI', 6302.046),
                         [('NII', 6549.86), ('H_alpha', 6564.61), ('NII', 6585.27)],
                         [('SII', 6718.29), ('SII', 6732.67)]]
+        # total fluxes of detected emission lines
+        self.flux_emlines = {}
 
     """
     Prepare the spectra for stacking: deredshift, normalize, compute SNR and
@@ -306,7 +308,7 @@ class Stack:
 
         if refit:
             if len(self.gaussians) == 0:
-                self._fit_residual()
+                self.fit_residual()
             # galaxy spectrum is already in same wavelength range as stellar library
             wave = np.array(self.pp.lam)
             flux = np.array(self.pp.galaxy)
@@ -378,55 +380,75 @@ class Stack:
         self.temp_weights = temp_weights
         self.residual = self.pp.galaxy - self.pp.bestfit
 
-    def analyze_residual(self):
-        if len(self.gaussians) == 0:
-            # detect and fit emission lines in residual
-            self._fit_residual()
-        # integrate detected emission lines
-        self._integrate_gaussians()
+    """
+    Fit residual spectrum at emission lines with gaussians
+    """
+    def fit_residual(self):
+        wv = self.pp.lam
+        rs = self.residual
+        for el in self.emlines:
+            if isinstance(el, tuple):
+                line = el[1]
+                name = el[0]
+                self._fit_singlet(wv, rs, line, name)
+            elif isinstance(el, list) and len(el) == 2:
+                doublet = [el[0][1], el[1][1]]
+                name = el[0][0] + '-' + el[1][0]
+                self._fit_doublet(wv, rs, doublet, name)
+            elif isinstance(el, list) and len(el) == 3:
+                triplet = [el[0][1], el[1][1], el[2][1]]
+                name = el[0][0] + '-' + el[1][0] + '-' + el[2][0]
+                self._fit_triplet(wv, rs, triplet, name)
 
-    def attenuate_dust(self):
+    """
+    Set the total flux of the detected emission lines
+
+    NOTE:
+        Shifting the gaussian fits vertically by -y (offset) and integrating from
+        -inf to +inf yields a (amplitude) as the total flux
+    """
+    def set_emlines_flux(self):
+        for (key, val) in self.gaussians.items():
+            parts = key.split('-')
+            for (i, p) in enumerate(parts):
+                ia = i*3
+                f = val['popt'][ia]
+                e = np.sqrt(val['pcov'][ia][ia])
+                self.flux_emlines[p] = (f, e)
+
+    """
+    Estimate dust attenuation from H_alpha and H_beta total flux and correct
+    stacked spectrum using the Fitzpatrick extinction curve
+
+    NOTE:
+        assume Calzetti et al. 2000 extinction curve with R_V = 3.1 to estimate
+        gas color excess. Compute the star color excess with the fudge factor 0.44
+    """
+    def correct_dust_attenuation(self):
         # compute color excess of gas
         # - H_alpha can be detected as singlet, doublet with NII or as triplet
         #   with NII on the left and on the right
         # - H_beta is detected as singlet
-        g_Ha = None
-        g_Hb = None
-        for (key, val) in self.gaussians.items():
+        F_Ha = None
+        F_Hb = None
+        for (key, val) in self.flux_emlines.items():
             if 'H_alpha' in key:
-                g_Ha = val
-                if g_Ha['type'] == 'doublet':
-                    parts = key.split('-')
-                    for (i, p) in enumerate(parts):
-                        if 'H_alpha' in p:
-                            position_Ha = i
+                F_Ha = val[0]
             if 'H_beta' in key:
-                g_Hb = val
-        if g_Ha == None and g_Hb == None:
+                F_Hb = val[0]
+        if F_Ha == None and F_Hb == None:
             print("No emission lines detected.")
             return
-        elif g_Ha == None:
+        elif F_Ha == None:
             print("No H_alpha line detected.")
             return
-        elif g_Hb == None:
+        elif F_Hb == None:
             print("No H_beta line detected.")
             return
-        if g_Ha['type'] == 'singlet':
-            F_Ha = g_Ha['popt'][0]
-            print('H_alpha is a singlet')
-        elif g_Ha['type'] == 'doublet' and position_Ha == 0:
-            F_Ha = g_Ha['popt'][0]
-            print('H_alpha is first peak in a doublet')
-        elif g_Ha['type'] == 'doublet' and position_Ha == 1:
-            F_Ha = g_Ha['popt'][3]
-            print('H_alpha is second peak in a doublet')
-        elif g_Ha['type'] == 'triplet':
-            F_Ha = g_Ha['popt'][3]
-            print('H_alpha is second peak in a triplet')
-        F_Hb = g_Hb['popt'][0]
         E_gas = 1.97*np.log10(F_Ha/F_Hb/2.86)
         # compute color excess of stars
         E_stars = 0.44*E_gas
+        print("\t dust attenuation: {}".format(E_stars))
         # correct flux with Fitzpatrick extinction curve
         correction = 0.4*E_stars*Fitzpatrick_EC(self.wave)
         self.flux *= 10**(correction)
@@ -674,26 +696,6 @@ class Stack:
             return detected[0]
         else:
             return detected
-
-    """
-    Fit residual spectrum at emission lines with gaussians
-    """
-    def _fit_residual(self):
-        wv = self.pp.lam
-        rs = self.residual
-        for el in self.emlines:
-            if isinstance(el, tuple):
-                line = el[1]
-                name = el[0]
-                self._fit_singlet(wv, rs, line, name)
-            elif isinstance(el, list) and len(el) == 2:
-                doublet = [el[0][1], el[1][1]]
-                name = el[0][0] + '-' + el[1][0]
-                self._fit_doublet(wv, rs, doublet, name)
-            elif isinstance(el, list) and len(el) == 3:
-                triplet = [el[0][1], el[1][1], el[2][1]]
-                name = el[0][0] + '-' + el[1][0] + '-' + el[2][0]
-                self._fit_triplet(wv, rs, triplet, name)
 
     """
     Fit a signal around @line with a simple gaussian curve

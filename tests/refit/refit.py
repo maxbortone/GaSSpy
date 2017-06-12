@@ -93,9 +93,6 @@ lam1 = np.array(stack.pp.lam)
 t = clock()
 stack.ppxffit(temp=tp, refit=True)
 print("- ppxf refit: {}".format(clock()-t))
-t = clock()
-stack.analyze_residual()
-print("- analyze residual: {}".format(clock()-t))
 
 galaxy2 = np.array(stack.pp.galaxy)
 bestfit2 = np.array(stack.pp.bestfit)
@@ -117,8 +114,6 @@ for i, line in enumerate(emlines):
     ax0.axvline(line, color='k', linewidth=1, linestyle='--')
     ax1.axvline(line, color='k', linewidth=1, linestyle='--')
 for (key, val) in gaussians.items():
-    print("\t{}:".format(key))
-    print("\t\tI = {:.4f} +- {:.4f}".format(val['integral'], val['integral_error']))
     ax0.plot(val['gx'], val['gs'], 'lightblue')
 handle_gaussian = mlines.Line2D([], [], color='lightblue', markersize=15, label="gaussian")
 ax0.set_ylabel(r"flux [\SI{e-17}{\ergs\per\second\per\square\centi\meter\per\angstrom}]")
