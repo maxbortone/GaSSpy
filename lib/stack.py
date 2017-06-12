@@ -395,6 +395,11 @@ class Stack:
         for (key, val) in self.gaussians.items():
             if 'H_alpha' in key:
                 g_Ha = val
+                if g_Ha['type'] == 'doublet':
+                    parts = key.split('-')
+                    for (i, p) in enumerate(parts):
+                        if 'H_alpha' in p:
+                            position_Ha = i
             if 'H_beta' in key:
                 g_Hb = val
         if g_Ha == None and g_Hb == None:
@@ -408,10 +413,16 @@ class Stack:
             return
         if g_Ha['type'] == 'singlet':
             F_Ha = g_Ha['popt'][0]
-        elif g_Ha['type'] == 'doublet':
+            print('H_alpha is a singlet')
+        elif g_Ha['type'] == 'doublet' and position_Ha == 0:
             F_Ha = g_Ha['popt'][0]
+            print('H_alpha is first peak in a doublet')
+        elif g_Ha['type'] == 'doublet' and position_Ha == 1:
+            F_Ha = g_Ha['popt'][3]
+            print('H_alpha is second peak in a doublet')
         elif g_Ha['type'] == 'triplet':
             F_Ha = g_Ha['popt'][3]
+            print('H_alpha is second peak in a triplet')
         F_Hb = g_Hb['popt'][0]
         E_gas = 1.97*np.log10(F_Ha/F_Hb/2.86)
         # compute color excess of stars
