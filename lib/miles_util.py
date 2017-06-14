@@ -46,6 +46,8 @@ def age_metal(filename):
 
     """
     s = path.basename(filename).split("_")[0]
+    if "fits" in s:
+        s = s.split(".fits")[0]
     age = float(s[s.find("T")+1:])
     metal = s[s.find("Z")+1:s.find("T")]
     if "m" in metal:
