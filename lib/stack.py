@@ -299,6 +299,7 @@ class Stack:
         FWHM_gal = 2.76
         # path to miles stellar library
         path = os.path.join(os.path.dirname(__file__), 'miles_models')
+        # TODO: export this object to a parameter that can be passed by the user
         templates = {
             'default': 'MILES_default/Mun1.30*.fits',
             'kb': 'MILES_Padova00_kb/Mkb1.30*.fits',
@@ -480,28 +481,21 @@ class Stack:
         plot of stacked spectra
     """
     def plotStack(self, filename=None, title=None):
-        import matplotlib as mpl
         import matplotlib.pyplot as plt
         from matplotlib.ticker import MultipleLocator
-        # setup matplotlib
-        mpl.rcParams['text.usetex'] = True
-        mpl.rcParams['text.latex.preamble'] = [
-               r'\usepackage{siunitx}',
-               r'\DeclareSIUnit\ergs{ergs}',
-               r'\sisetup{per-mode=symbol}'
-        ]
+        plt.style.use('fivezerosix')
         wv = self.wave
-        f, axes = plt.subplots(3, 1, sharex=True, figsize=(16, 9))
+        f, axes = plt.subplots(3, 1, sharex=True, figsize=(11.69, 8.27))
         if self.correction is not None:
             axes[0].text(0.75, 0.85, "bias correction: ON", bbox=dict(facecolor='red', alpha=0.5), transform=axes[0].transAxes)
         else:
             axes[0].text(0.75, 0.85, "bias correction: OFF", bbox=dict(facecolor='red', alpha=0.5), transform=axes[0].transAxes)
-        axes[0].plot(wv, self.flux, 'b', label="stacked flux")
-        axes[0].plot(wv, self.error, 'g', label="error")
+        axes[0].plot(wv, self.flux, label="stacked flux")
+        axes[0].plot(wv, self.error, label="error")
         axes[0].set_ylabel(r"flux [\SI{e-17}{\ergs\per\second\per\square\centi\meter\per\angstrom}]")
         axes[0].legend(loc="upper left", frameon=False)
-        axes[1].plot(wv, self.dispersion, 'r', label="dispersion")
-        axes[1].plot(wv, self.correction, 'y', label="bias correction")
+        axes[1].plot(wv, self.dispersion, label="dispersion")
+        axes[1].plot(wv, self.correction, label="bias correction")
         axes[1].set_ylabel(r"flux [\SI{e-17}{\ergs\per\second\per\square\centi\meter\per\angstrom}]")
         axes[1].legend(loc="upper left", frameon=False)
         axes[2].plot(wv, self.contributions, label="contributions")
@@ -527,25 +521,18 @@ class Stack:
         plot of bestfit spectra obtained from ppxf
     """
     def plotFit(self, filename=None, title=None):
-        import matplotlib as mpl
         import matplotlib.pyplot as plt
-        # setup matplotlib
-        mpl.rcParams['text.usetex'] = True
-        mpl.rcParams['text.latex.preamble'] = [
-               r'\usepackage{siunitx}',
-               r'\DeclareSIUnit\ergs{ergs}',
-               r'\sisetup{per-mode=symbol}'
-        ]
+        plt.style.use('fivezerosix')
         wv = self.pp.lam
         f, axes = plt.subplots(1, 1, figsize=(11.69,8.27))
-        axes.plot(wv, self.pp.galaxy, 'b', label="stacked spectrum")
-        axes.plot(wv, self.pp.bestfit, 'g', label="ppxf fit")
-        axes.plot(wv, self.residual, 'r', label="residual")
+        axes.plot(wv, self.pp.galaxy, label="stacked spectrum")
+        axes.plot(wv, self.pp.bestfit, label="ppxf fit")
+        axes.plot(wv, self.residual, label="residual")
         if self.SNR:
             axes.text(0.75, 0.05, "SNR = {:.2f}".format(self.SNR), bbox=dict(facecolor='red', alpha=0.5), transform=axes.transAxes)
         axes.set_ylabel(r"flux [\SI{e-17}{\ergs\per\second\per\square\centi\meter\per\angstrom}]")
         axes.set_xlabel(r"wavelength [\si{\angstrom}]")
-        axes.legend(loc="best", frameon=False)
+        axes.legend(loc="center right", frameon=False)
         if title is not None:
             axes.set_title(title)
         if filename:
@@ -566,16 +553,9 @@ class Stack:
         plot of spectra with shared x-axis
     """
     def plotSpectra(self, indices, fl='flux', wl='loglam', wr=None, show=True, title=None, filename=None):
-        import matplotlib as mpl
         import matplotlib.pyplot as plt
         from matplotlib.ticker import MultipleLocator
-        # setup matplotlib
-        mpl.rcParams['text.usetex'] = True
-        mpl.rcParams['text.latex.preamble'] = [
-               r'\usepackage{siunitx}',
-               r'\DeclareSIUnit\ergs{ergs}',
-               r'\sisetup{per-mode=symbol}'
-        ]
+        plt.style.use('fivezerosix')
         f, axes = plt.subplots(len(indices), 1, figsize=(11.69,8.27), sharex=True)
         for (k, index) in enumerate(indices):
             sp = self.spectra[index]
