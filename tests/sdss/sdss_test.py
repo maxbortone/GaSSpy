@@ -5,6 +5,9 @@ sys.path.append(path + "lib/")
 import numpy as np
 from stack import Stack
 from prettytable import PrettyTable
+import matplotlib.pyplot as plt
+
+plt.style.use('fivezerosix')
 
 # import fits file and initialize stacks
 sdss_path = path + 'SDSS_spectra/'

@@ -4,17 +4,11 @@ path = os.path.dirname(__file__).split('test')[0]
 sys.path.append(path + "lib/")
 import numpy as np
 from stack import Stack
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 import lineid_plot
 
-mpl.rcParams['text.usetex'] = True
-mpl.rcParams['text.latex.preamble'] = [
-       r'\usepackage{siunitx}',
-       r'\DeclareSIUnit\ergs{ergs}',
-       r'\sisetup{per-mode=symbol}'
-]
+plt.style.use('fivezerosix')
 
 #######################################################################
 # TEST: ppxf fitting and refitting
@@ -26,8 +20,9 @@ mpl.rcParams['text.latex.preamble'] = [
 # import fits file and initialize stack
 # spectra_path = path + 'spectra_dustcorr/'
 # spectra_path = path + 'SDSS_spectra/young'
-spectra_path = path + 'SDSS_spectra/intermediate'
+# spectra_path = path + 'SDSS_spectra/intermediate'
 # spectra_path = path + 'SDSS_spectra/old'
+spectra_path = path + 'SDSS_spectra/bin_15'
 
 spectra_files = [os.path.join(spectra_path, f) for f in os.listdir(spectra_path) if os.path.isfile(os.path.join(spectra_path, f))]
 print("Running refit test on stack with {} spectra".format(len(spectra_files)))
@@ -100,6 +95,21 @@ residual2 = np.array(stack.residual)
 lam2 = np.array(stack.pp.lam)
 gaussians = stack.gaussians
 
+f, ax = plt.subplots(1, 1, figsize=(11.69, 8.27))
+handle_stack, = ax.plot(lam1, galaxy1, label="stack")
+handle_fit, = ax.plot(lam1, bestfit1, label="fit")
+handle_residual, = ax.plot(lam1, residual1, label="residual")
+lineid_plot.plot_line_ids(stack.wave, stack.flux, emlines, emlabels, ax=ax,
+                          max_iter=300, extend=False, add_label_to_artists=False)
+for i, line in enumerate(emlines):
+    ax.axvline(line, color='#8b8b8b', linewidth=1, linestyle='--')
+for (key, val) in gaussians.items():
+    ax.plot(val['gx'], val['gs'], '#6d904f')
+handle_gaussian = mlines.Line2D([], [], color='#6d904f', markersize=15, label="gaussian")
+ax.set_ylabel(r"flux [\SI{e-17}{\ergs\per\second\per\square\centi\meter\per\angstrom}]")
+ax.set_xlabel(r"wavelength [\si{\angstrom}]")
+ax.legend(handles=[handle_stack, handle_fit, handle_residual, handle_gaussian], loc='best')
+
 f, (ax0, ax1) = plt.subplots(2, 1, figsize=(7.0, 10.0), sharex=True)
 f.suptitle('Emission line fill in correction')
 handle_stack, = ax0.plot(lam1, galaxy1, label="stack")
@@ -114,8 +124,8 @@ for i, line in enumerate(emlines):
     ax0.axvline(line, color='k', linewidth=1, linestyle='--')
     ax1.axvline(line, color='k', linewidth=1, linestyle='--')
 for (key, val) in gaussians.items():
-    ax0.plot(val['gx'], val['gs'], 'lightblue')
-handle_gaussian = mlines.Line2D([], [], color='lightblue', markersize=15, label="gaussian")
+    ax0.plot(val['gx'], val['gs'], '#6d904f')
+handle_gaussian = mlines.Line2D([], [], color='#6d904f', markersize=15, label="gaussian")
 ax0.set_ylabel(r"flux [\SI{e-17}{\ergs\per\second\per\square\centi\meter\per\angstrom}]")
 ax1.set_ylabel(r"flux [\SI{e-17}{\ergs\per\second\per\square\centi\meter\per\angstrom}]")
 ax1.set_xlabel(r"wavelength [\si{\angstrom}]")

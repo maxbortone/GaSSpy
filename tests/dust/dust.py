@@ -4,21 +4,16 @@ path = os.path.dirname(__file__).split('test')[0]
 sys.path.append(path + "lib/")
 import numpy as np
 from stack import Stack
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 
-mpl.rcParams['text.usetex'] = True
-mpl.rcParams['text.latex.preamble'] = [
-       r'\usepackage{siunitx}',
-       r'\DeclareSIUnit\ergs{ergs}',
-       r'\sisetup{per-mode=symbol}'
-]
+plt.style.use('fivezerosix')
 
 # import fits file and initialize stack
 # spectra_path = path + 'spectra_dustcorr/'
 # spectra_path = path + 'SDSS_spectra/young'
-spectra_path = path + 'SDSS_spectra/intermediate'
+# spectra_path = path + 'SDSS_spectra/intermediate'
 # spectra_path = path + 'SDSS_spectra/old'
+spectra_path = path + 'SDSS_spectra/bin_15'
 
 spectra_files = [os.path.join(spectra_path, f) for f in os.listdir(spectra_path) if os.path.isfile(os.path.join(spectra_path, f))]
 print("Running PPXF test on stack with {} spectra".format(len(spectra_files)))
@@ -68,8 +63,10 @@ print("- correct dust attenuation: {}".format(clock()-t))
 
 galaxy2 = np.array(stack.flux)
 
-f, ax = plt.subplots(1, 1, figsize=(7.0, 10.0))
+f, ax = plt.subplots(1, 1, figsize=(11.69, 8.27))
 ax.plot(stack.wave, galaxy1, label="stacked spectrum")
-ax.plot(stack.wave, galaxy2, label="dust attenuated")
+ax.plot(stack.wave, galaxy2, label="with dust attenuation correction")
+ax.set_ylabel(r"flux [\SI{e-17}{\ergs\per\second\per\square\centi\meter\per\angstrom}]")
+ax.set_xlabel(r"wavelength [\si{\angstrom}]")
 ax.legend(loc="best")
 plt.show()

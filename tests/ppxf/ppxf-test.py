@@ -4,20 +4,13 @@ path = os.path.dirname(__file__).split('test')[0]
 sys.path.append(path + "lib/")
 import numpy as np
 from stack import Stack
-import matplotlib as mpl
-
-mpl.rcParams['text.usetex'] = True
-mpl.rcParams['text.latex.preamble'] = [
-       r'\usepackage{siunitx}',
-       r'\DeclareSIUnit\ergs{ergs}',
-       r'\sisetup{per-mode=symbol}'
-]
 
 # import fits file and initialize stack
 # spectra_path = path + 'spectra_dustcorr/'
 # spectra_path = path + 'SDSS_spectra/young'
-spectra_path = path + 'SDSS_spectra/intermediate'
+# spectra_path = path + 'SDSS_spectra/intermediate'
 # spectra_path = path + 'SDSS_spectra/old'
+spectra_path = path + 'SDSS_spectra/bin_15'
 
 spectra_files = [os.path.join(spectra_path, f) for f in os.listdir(spectra_path) if os.path.isfile(os.path.join(spectra_path, f))]
 print("Running PPXF test on stack with {} spectra".format(len(spectra_files)))
