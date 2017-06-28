@@ -179,11 +179,13 @@ class Stack:
     """
     Calculate the weighted average of the stack
 
+    INPUT:
+        correct: set to False to deactivate sampling bias correction
     NOTE:
         run prepare_spectra, determine_wavelength_range and
         determine_weights before average!
     """
-    def average(self):
+    def average(self, correct=True):
         lam = self.spectra[0].lam_interp
         flux = np.empty(self.M)
         error = np.empty(self.M)
@@ -219,6 +221,9 @@ class Stack:
         self.contributions = contrs
         self.P = P
         self.S = S
+        # run bias correction
+        if correct:
+            self._correct()
 
     """
     Use the jackknife method to estimate the dispersion in the sample
@@ -327,8 +332,6 @@ class Stack:
             mask = (self.wave > 3540) & (self.wave < 7409)
             noise = self.error[mask]
         else:
-            # run bias correction
-            self._correct()
             # bring galaxy spectrum to same wavelength range as stellar library
             mask = (self.wave > 3540) & (self.wave < 7409)
             wave = self.wave[mask]
